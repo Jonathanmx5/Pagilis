@@ -627,6 +627,78 @@ def move_text_block(
     return compte
 
 
+# ------------------------------------------------- édition rapide d'une ligne
+
+
+@dataclass
+class LineInfo:
+    """Ligne de texte sous la souris (page « Modifier »). Rectangles en repère affiché."""
+
+    rect: fitz.Rect
+    text: str
+    size: float
+    block_rect: fitz.Rect
+
+
+def _line_under(page: fitz.Page, point: fitz.Point) -> Optional[dict]:
+    """Ligne (dict rawdict) dont le cadre contient le point affiché, à 2 pt près."""
+    cible = fitz.Point(point) * page.derotation_matrix
+    for line, _chars in iter_lines(page):
+        if (fitz.Rect(line["bbox"]) + (-2, -2, 2, 2)).contains(cible):
+            return line
+    return None
+
+
+def line_at(page: fitz.Page, point: fitz.Point) -> Optional[LineInfo]:
+    """Ligne lisible horizontalement sous `point` (repère affiché), ou None."""
+    line = _line_under(page, point)
+    if line is None:
+        return None
+    spans = _spans_of_line(line)
+    if not spans:
+        return None
+    rect = to_displayed(page, line["bbox"])
+    bloc = next((b for b in text_blocks(page) if (b + (-1, -1, 1, 1)).contains(rect)), rect)
+    principal = max(spans, key=lambda s: len(s.text))
+    return LineInfo(rect=rect, text="".join(s.text for s in spans), size=principal.size, block_rect=bloc)
+
+
+def rewrite_line(
+    doc: fitz.Document,
+    page_index: int,
+    point: fitz.Point,
+    new_text: str,
+    shrink_if_longer: bool = True,
+) -> bool:
+    """Remplace tout le texte de la ligne sous `point` (repère affiché) par new_text.
+
+    La ligne est réécrite au style de son segment le plus long, à la ligne de
+    base de son premier segment ; un texte plus large est réduit pour tenir
+    dans la largeur d'origine. Texte vide : la ligne est effacée. Retourne
+    Faux si aucune ligne n'est sous le point ou si le texte est inchangé.
+    """
+    page = doc[page_index]
+    line = _line_under(page, point)
+    spans = _spans_of_line(line) if line else []
+    if not spans:
+        return False
+    ancien = "".join(s.text for s in spans)
+    if new_text == ancien:
+        return False
+    _redact_rects(page, [s.bbox for s in spans])
+    if new_text:
+        principal = max(spans, key=lambda s: len(s.text))
+        reduction = 1.0
+        if shrink_if_longer:
+            largeur_ancienne = fitz.get_text_length(ancien, fontname="helv", fontsize=principal.size)
+            largeur_nouvelle = fitz.get_text_length(new_text, fontname="helv", fontsize=principal.size)
+            if largeur_nouvelle > largeur_ancienne > 0:
+                reduction = largeur_ancienne / largeur_nouvelle
+        segment = TextSpan(**{**principal.__dict__, "text": new_text})
+        _write_span(page, segment, spans[0].origin, reduction)
+    return True
+
+
 # ----------------------------------------------------------------- OCR
 
 

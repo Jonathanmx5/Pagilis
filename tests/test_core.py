@@ -380,3 +380,102 @@ def test_ocr_real_if_tessdata(tmp_path, rotation):
     trouve.normalize()
     assert trouve.intersects(attendu)
     doc.close()
+
+
+# ------------------------------------------------- édition rapide d'une ligne
+
+LIGNES = [(60, 140, "Le client accepte le devis."), (60, 158, "Montant total : 1 200 euros."),
+          (60, 176, "Le client signe ci-dessous.")]
+
+
+def centre_ligne(page, needle):
+    r = displayed_rect(page, needle)
+    return fitz.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+
+
+def texte_page(page):
+    return " ".join(page.get_text().split())
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_line_at_finds_displayed_line(tmp_path, rotation):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}, rotation=rotation, size=(400, 500)))
+    page = doc[0]
+    point = centre_ligne(page, "Montant")
+    info = core.line_at(page, point)
+    assert info is not None
+    assert info.text == "Montant total : 1 200 euros."
+    assert info.rect.contains(point)
+    assert info.block_rect.contains(info.rect)
+    assert info.rect.width > info.rect.height  # repère affiché
+    assert abs(info.size - 12) < 0.1
+
+
+def test_line_at_outside_text_is_none(tmp_path):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", pages=2, texts={0: LIGNES}))
+    assert core.line_at(doc[0], fitz.Point(5, 5)) is None
+    assert core.line_at(doc[1], fitz.Point(100, 150)) is None
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_rewrite_line_replaces_only_that_line(tmp_path, rotation):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}, rotation=rotation, size=(400, 500)))
+    page = doc[0]
+    avant = displayed_origin(page, "Montant")
+    assert core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 950 euros.")
+    texte = texte_page(page)
+    assert "Montant total : 950 euros." in texte and "1 200" not in texte
+    assert "Le client accepte le devis." in texte and "Le client signe ci-dessous." in texte
+    apres = displayed_origin(page, "Montant")
+    assert abs(apres.x - avant.x) < 2 and abs(apres.y - avant.y) < 2
+    rect = displayed_rect(page, "Montant")
+    assert rect.width > rect.height
+
+
+def test_rewrite_line_empty_text_erases(tmp_path):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))
+    assert core.rewrite_line(doc, 0, centre_ligne(doc[0], "Montant"), "")
+    texte = texte_page(doc[0])
+    assert "Montant" not in texte
+    assert "Le client accepte le devis." in texte and "Le client signe ci-dessous." in texte
+
+
+def test_rewrite_line_shrinks_longer_text(tmp_path):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))
+    page = doc[0]
+    largeur = core.line_at(page, centre_ligne(page, "Montant")).rect.width
+    core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 1 200 euros. " * 2)
+    info = core.line_at(page, centre_ligne(page, "Montant"))
+    assert info.rect.width <= largeur + 1
+
+
+def test_rewrite_line_mixed_styles_uses_longest_span(tmp_path):
+    chemin = str(tmp_path / "mixte.pdf")
+    doc = fitz.open()
+    page = doc.new_page()
+    x = 50
+    for texte, police in (("Total ", "helv"), ("TTC", "hebo"), (" à payer maintenant", "helv")):
+        page.insert_text((x, 100), texte, fontname=police, fontsize=12)
+        x += fitz.get_text_length(texte, fontname=police, fontsize=12)
+    page.insert_text((50, 140), "Autre ligne", fontname="helv", fontsize=12)
+    doc.save(chemin)
+    doc = fitz.open(chemin)
+    page = doc[0]
+    assert core.rewrite_line(doc, 0, centre_ligne(page, "payer"), "Total HT à payer demain")
+    spans = [s for b in page.get_text("dict")["blocks"] for l in b["lines"] for s in l["spans"]
+             if "payer" in s["text"]]
+    assert len(spans) == 1 and "Bold" not in spans[0]["font"]
+    assert "Total HT à payer demain" in texte_page(page) and "Autre ligne" in texte_page(page)
+
+
+def test_rewrite_line_unchanged_text_is_noop(tmp_path):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))
+    page = doc[0]
+    avant = page.read_contents()
+    assert not core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 1 200 euros.")
+    assert page.read_contents() == avant
+
+
+def test_rewrite_line_no_line_returns_false(tmp_path):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))
+    assert not core.rewrite_line(doc, 0, fitz.Point(5, 5), "rien")
