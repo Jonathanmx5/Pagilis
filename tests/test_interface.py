@@ -239,7 +239,8 @@ def test_replace_all_from_modifier_is_undoable(ui, contrat):
         m.entree_recherche.insert(0, "client")
         m.entree_remplacement.insert(0, "acheteur")
         m.remplacer_tout()
-        yield 100
+        assert app.travaux_en_cours == 1  # en arrière-plan
+        yield TRAVAUX
         texte = " ".join(app.edition.doc[0].get_text().split())
         assert "acheteur accepte" in texte and "client" not in texte
         assert app.edition.modifie and "4 remplacement(s)" in app.etat.cget("text")

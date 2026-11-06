@@ -227,8 +227,19 @@ class PageModifier(PageCopie):
             return self.app.statut("Saisissez le texte à remplacer.")
         self._fermer_saisie()
         nouveau, casse = self.entree_remplacement.get(), self.casse.get()
-        n = self.retoucher(lambda: self.edition.remplacer(ancien, nouveau, casse))
-        if n:
-            self.app.statut(f"{n} remplacement(s). Ctrl+Z pour annuler.")
-        elif n == 0:
-            self._afficher_resultats({})
+        edition = self.edition
+
+        def fin(n: int):
+            if n:
+                self.app.statut(f"{n} remplacement(s). Ctrl+Z pour annuler.")
+            else:
+                self._afficher_resultats({})
+
+        def toujours():
+            # Réussi ou non (la copie de travail est alors restaurée), l'aperçu suit.
+            self.apercu.remplacer(edition.doc)
+            self.maj_etat()
+
+        # En arrière-plan : sur un long document, la fenêtre reste vivante et la barre avance.
+        self.app.statut("Remplacement en cours…")
+        self.app.lancer(lambda p: edition.remplacer(ancien, nouveau, casse, progress=p), fin=fin, toujours=toujours)

@@ -59,10 +59,14 @@ class Edition:
         """Déplace les lignes de `rect` (repère affiché). Retourne le nombre de segments."""
         return self._retoucher(lambda: core.move_text_block(self.doc, page, rect, dx, dy))
 
-    def remplacer(self, ancien: str, nouveau: str, casse: bool = False) -> int:
-        """Remplace partout `ancien` par `nouveau` ; retourne le nombre de remplacements."""
+    def remplacer(self, ancien: str, nouveau: str, casse: bool = False, progress=None) -> int:
+        """Remplace partout `ancien` par `nouveau` ; retourne le nombre de remplacements.
+
+        Peut tourner hors du thread de l'interface, pourvu que celle-ci ne touche
+        pas au document pendant ce temps (voir Pagilis.lancer).
+        """
         return self._retoucher(lambda: core.replace_text(self.doc, ancien, nouveau, range(self.doc.page_count),
-                                                         casse, shrink_if_longer=True))
+                                                         casse, shrink_if_longer=True, progress=progress))
 
     # Gestion des pages (fonction « Pages »), annulable comme les retouches de texte.
 

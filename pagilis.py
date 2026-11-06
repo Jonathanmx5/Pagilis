@@ -410,10 +410,12 @@ class Pagilis(ctk.CTk):
 
     # ------------------------------------------------- traitements en arrière-plan
 
-    def lancer(self, travail, fin=None):
+    def lancer(self, travail, fin=None, toujours=None):
         """Exécute `travail(progress)` dans un thread ; la barre suit la progression.
 
-        Les variables Tk doivent être lues AVANT l'appel, dans le thread de l'interface.
+        `fin(resultat)` suit un succès ; `toujours()` suit le traitement, réussi ou
+        non (les deux dans le thread de l'interface). Les variables Tk doivent être
+        lues AVANT l'appel, dans le thread de l'interface.
         """
 
         def progress(i, n):
@@ -439,6 +441,8 @@ class Pagilis(ctk.CTk):
                     identite.NOM_AFFICHE, "Erreur inattendue. Détails dans pagilis.log."))
             finally:
                 self.after(0, lambda: self.barre.set(0))
+                if toujours:
+                    self.after(0, toujours)
                 self.after(0, self._fin_travail)
 
         for page in self.fonctions.values():
