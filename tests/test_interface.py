@@ -194,11 +194,11 @@ def test_search_highlights_occurrences_and_lists_pages(ui, contrat):
     def scenario():
         app.charger_fichier(str(contrat))
         app.afficher_page("Remplacer du texte")
-        app.entree_ancien.insert(0, "client")
-        app.rechercher_texte()
+        app.fonctions["Remplacer du texte"].entree_ancien.insert(0, "client")
+        app.fonctions["Remplacer du texte"].rechercher_texte()
         yield TRAVAUX
         yield 200
-        assert sorted(app.resultats_recherche) == [0, 1]
+        assert sorted(app.fonctions["Remplacer du texte"].resultats_recherche) == [0, 1]
         assert len(superpositions(app)) == 2, "les 2 occurrences de la page 1 doivent être surlignées"
         app.apercu.aller(1)  # page tournée : surlignage aussi
         yield 300
@@ -218,10 +218,10 @@ def test_search_on_scan_suggests_ocr(ui, tmp_path):
     def scenario():
         app.charger_fichier(str(scan))
         app.afficher_page("Remplacer du texte")
-        app.entree_ancien.insert(0, "contrat")
-        app.rechercher_texte()
+        app.fonctions["Remplacer du texte"].entree_ancien.insert(0, "contrat")
+        app.fonctions["Remplacer du texte"].rechercher_texte()
         yield TRAVAUX
-        textes = [w.cget("text") for w in app.cadre_resultats.winfo_children()]
+        textes = [w.cget("text") for w in app.fonctions["Remplacer du texte"].cadre_resultats.winfo_children()]
         assert any("OCR" in t for t in textes)
 
     executer(app, scenario)
@@ -235,18 +235,18 @@ def test_stamp_click_drag_then_applied_on_displayed_page(ui, contrat, signature,
     def scenario():
         app.charger_fichier(str(contrat))
         app.afficher_page("Signature / Tampon")
-        app.image_tampon = str(signature)
-        app.ratio_tampon = 160 / 400
+        app.fonctions["Signature / Tampon"].image_tampon = str(signature)
+        app.fonctions["Signature / Tampon"].ratio_tampon = 160 / 400
         app.apercu.aller(1)
         yield 300
         app._souris_appui(fitz.Point(300, 200))  # clic : l'image est centrée sur le clic
         app._souris_glisse(fitz.Point(330, 250))  # glisser
         app._souris_relache(fitz.Point(330, 250))
-        rect = app._rect_tampon()
+        rect = app.fonctions["Signature / Tampon"]._rect_tampon()
         assert abs(rect.x0 + rect.width / 2 - 330) < 1 and abs(rect.y0 + rect.height / 2 - 250) < 1
         assert len(superpositions(app)) >= 2  # image + cadre en surimpression
         d.enregistrer_sous = str(sortie)
-        app.lancer_tampon()
+        app.fonctions["Signature / Tampon"].lancer_tampon()
         yield TRAVAUX
         resultat = fitz.open(sortie)
         assert not resultat[0].get_images() and resultat[1].get_images(), "tampon sur la page affichée (2)"
@@ -270,16 +270,16 @@ def test_move_block_on_rotated_page_with_ghost(ui, contrat, tmp_path):
         centre = fitz.Point((bloc.x0 + bloc.x1) / 2, (bloc.y0 + bloc.y1) / 2)
         app._souris_appui(centre)  # clic sur un bloc encadré : sélection
         app._souris_relache(centre)
-        assert app.selection is not None
+        assert app.fonctions["Déplacer du texte"].selection is not None
         app._souris_appui(centre)  # glisser la sélection : fantôme + décalage
         app._souris_glisse(centre + (0, 100))
         app._souris_relache(centre + (0, 100))
-        assert (app.entree_dx.get(), app.entree_dy.get()) == ("0", "100")
+        assert (app.fonctions["Déplacer du texte"].entree_dx.get(), app.fonctions["Déplacer du texte"].entree_dy.get()) == ("0", "100")
         app.apercu.zoomer(1.25)  # un zoom ne doit PAS effacer la sélection
         yield 300
-        assert app.selection is not None
+        assert app.fonctions["Déplacer du texte"].selection is not None
         d.enregistrer_sous = str(sortie)
-        app.lancer_deplacement()
+        app.fonctions["Déplacer du texte"].lancer_deplacement()
         yield TRAVAUX
         page = fitz.open(sortie)[1]
         mot = [core.to_displayed(page, w[:4]) for w in page.get_text("words") if w[4] == "signe"][0]
@@ -296,10 +296,10 @@ def test_page_change_clears_selection(ui, contrat):
         app.charger_fichier(str(contrat))
         app.afficher_page("Déplacer du texte")
         yield 300
-        app.selection = fitz.Rect(50, 120, 300, 200)
+        app.fonctions["Déplacer du texte"].selection = fitz.Rect(50, 120, 300, 200)
         app.apercu.aller(1)
         yield 100
-        assert app.selection is None and app.entree_zone.get() == ""
+        assert app.fonctions["Déplacer du texte"].selection is None and app.fonctions["Déplacer du texte"].entree_zone.get() == ""
 
     executer(app, scenario)
 
@@ -318,15 +318,15 @@ def test_merge_reorders_selected_file(ui, tmp_path):
 
     def scenario():
         app.afficher_page("Fusion")
-        app.liste_fusion = list(fichiers)
-        app._choisir_fusion(2)
-        app.deplacer_fusion(-1)  # c remonte avant b
-        app.deplacer_fusion(-1)  # puis avant a
-        app._choisir_fusion(2)
-        app.retirer_fusion()     # b retiré
-        assert [os.path.basename(f) for f in app.liste_fusion] == ["c.pdf", "a.pdf"]
+        app.fonctions["Fusion"].liste_fusion = list(fichiers)
+        app.fonctions["Fusion"]._choisir_fusion(2)
+        app.fonctions["Fusion"].deplacer_fusion(-1)  # c remonte avant b
+        app.fonctions["Fusion"].deplacer_fusion(-1)  # puis avant a
+        app.fonctions["Fusion"]._choisir_fusion(2)
+        app.fonctions["Fusion"].retirer_fusion()     # b retiré
+        assert [os.path.basename(f) for f in app.fonctions["Fusion"].liste_fusion] == ["c.pdf", "a.pdf"]
         d.enregistrer_sous = str(sortie)
-        app.lancer_fusion()
+        app.fonctions["Fusion"].lancer_fusion()
         yield TRAVAUX
         resultat = fitz.open(sortie)
         assert resultat.page_count == 4
@@ -343,10 +343,10 @@ def test_business_error_is_shown_not_crashing(ui, contrat, tmp_path):
     def scenario():
         app.charger_fichier(str(contrat))
         app.afficher_page("Division")
-        app.mode_division.set("plages")
-        app.entree_plages.insert(0, "1-9")
+        app.fonctions["Division"].mode_division.set("plages")
+        app.fonctions["Division"].entree_plages.insert(0, "1-9")
         d.dossier = str(tmp_path)
-        app.lancer_division()
+        app.fonctions["Division"].lancer_division()
         yield TRAVAUX
         yield 100
         assert ("showwarning", "Pagilis", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
@@ -371,8 +371,8 @@ def test_ocr_from_interface_frames_words(ui, tmp_path):
         app.charger_fichier(str(scan))
         app.afficher_page("OCR (scans)")
         d.enregistrer_sous = str(sortie)
-        app.continuer_ocr.set(True)
-        app.lancer_ocr()
+        app.fonctions["OCR (scans)"].continuer_ocr.set(True)
+        app.fonctions["OCR (scans)"].lancer_ocr()
         yield TRAVAUX
         yield 300
         assert fitz.open(sortie)[0].search_for("Bonjour")
@@ -530,8 +530,8 @@ def test_click_line_opens_entry_with_its_text(ui, contrat):
         yield 300
         cliquer(app, centre_mot(app.apercu.page, "Montant"))
         yield 50
-        assert app.saisie is not None and app.saisie.winfo_ismapped()
-        assert app.saisie.get() == "Montant total : 1 200 euros."
+        assert app.fonctions["Modifier"].saisie is not None and app.fonctions["Modifier"].saisie.winfo_ismapped()
+        assert app.fonctions["Modifier"].saisie.get() == "Montant total : 1 200 euros."
 
     executer(app, scenario)
 
@@ -545,13 +545,13 @@ def test_enter_applies_correction(ui, contrat):
         yield 300
         cliquer(app, centre_mot(app.apercu.page, "Montant"))
         yield 50
-        app.saisie.delete(0, "end")
-        app.saisie.insert(0, "Montant total : 950 euros.")
-        app.saisie._entry.focus_force()
+        app.fonctions["Modifier"].saisie.delete(0, "end")
+        app.fonctions["Modifier"].saisie.insert(0, "Montant total : 950 euros.")
+        app.fonctions["Modifier"].saisie._entry.focus_force()
         yield 50
-        app.saisie._entry.event_generate("<Return>", when="tail")
+        app.fonctions["Modifier"].saisie._entry.event_generate("<Return>", when="tail")
         yield 300
-        assert app.saisie is None and app.edition.modifie
+        assert app.fonctions["Modifier"].saisie is None and app.edition.modifie
         assert app.apercu.index == 1
         assert "Montant total : 950 euros." in " ".join(app.apercu.page.get_text().split())
 
@@ -567,10 +567,10 @@ def test_escape_cancels(ui, contrat):
         yield 300
         cliquer(app, centre_mot(app.apercu.page, "Montant"))
         yield 50
-        app.saisie.insert(0, "xxx")
-        app.saisie._entry.event_generate("<Escape>")
+        app.fonctions["Modifier"].saisie.insert(0, "xxx")
+        app.fonctions["Modifier"].saisie._entry.event_generate("<Escape>")
         yield 50
-        assert app.saisie is None and not app.edition.modifie
+        assert app.fonctions["Modifier"].saisie is None and not app.edition.modifie
 
     executer(app, scenario)
 
@@ -585,7 +585,7 @@ def test_entry_closes_on_zoom_page_change_or_job(ui, contrat, action):
         yield 300
         cliquer(app, centre_mot(app.apercu.page, "Montant"))
         yield 50
-        app.saisie.insert(0, "xxx")
+        app.fonctions["Modifier"].saisie.insert(0, "xxx")
         if action == "zoom":
             app.apercu.zoomer(1.25)
             yield 300
@@ -595,7 +595,7 @@ def test_entry_closes_on_zoom_page_change_or_job(ui, contrat, action):
         else:
             app.lancer(lambda p: None)
             yield TRAVAUX
-        assert app.saisie is None and not app.edition.modifie
+        assert app.fonctions["Modifier"].saisie is None and not app.edition.modifie
 
     executer(app, scenario)
 
@@ -613,7 +613,7 @@ def test_drag_moves_block_with_ghost(ui, contrat):
         assert superpositions(app)  # fantôme du bloc
         app._souris_relache(avant + (0, 100))
         yield 300
-        assert app.saisie is None and app.edition.modifie
+        assert app.fonctions["Modifier"].saisie is None and app.edition.modifie
         apres = centre_mot(app.apercu.page, "signe")
         assert abs(apres.y - (avant.y + 100)) < 3
 
@@ -632,7 +632,7 @@ def test_small_jitter_is_a_click(ui, contrat):
         app._souris_glisse(point + (1, 0))
         app._souris_relache(point + (1, 0))
         yield 50
-        assert app.saisie is not None and not app.edition.modifie
+        assert app.fonctions["Modifier"].saisie is not None and not app.edition.modifie
 
     executer(app, scenario)
 
@@ -649,7 +649,7 @@ def test_click_on_scan_suggests_ocr(ui, tmp_path):
         ouvrir_modifier(app, scan, page=0)
         yield 300
         cliquer(app, fitz.Point(200, 200))
-        assert app.saisie is None
+        assert app.fonctions["Modifier"].saisie is None
         assert app.etat.cget("text") == "Aucun texte ici. Page scannée ? Utilisez l'OCR d'abord."
 
     executer(app, scenario)
@@ -657,9 +657,9 @@ def test_click_on_scan_suggests_ocr(ui, tmp_path):
 
 def corriger_montant(app, texte="Montant total : 950 euros."):
     cliquer(app, centre_mot(app.apercu.page, "Montant"))
-    app.saisie.delete(0, "end")
-    app.saisie.insert(0, texte)
-    app._valider_saisie()
+    app.fonctions["Modifier"].saisie.delete(0, "end")
+    app.fonctions["Modifier"].saisie.insert(0, texte)
+    app.fonctions["Modifier"]._valider_saisie()
 
 
 def texte_de(chemin, page=1):
@@ -674,11 +674,11 @@ def test_ctrl_z_undoes_and_disables_button(ui, contrat):
         ouvrir_modifier(app, contrat)
         yield 300
         corriger_montant(app)
-        assert app.bouton_annuler.cget("state") == "normal"
-        app.annuler_retouche()
+        assert app.fonctions["Modifier"].bouton_annuler.cget("state") == "normal"
+        app.fonctions["Modifier"].annuler_retouche()
         yield 100
         assert "1 200 euros" in " ".join(app.apercu.page.get_text().split())
-        assert app.bouton_annuler.cget("state") == "disabled"
+        assert app.fonctions["Modifier"].bouton_annuler.cget("state") == "disabled"
 
     executer(app, scenario)
 
@@ -693,7 +693,7 @@ def test_ctrl_s_saves_proposed_name(ui, contrat, tmp_path):
         yield 300
         corriger_montant(app)
         d.enregistrer_sous = str(sortie)
-        app.enregistrer_edition()
+        app.fonctions["Modifier"].enregistrer_edition()
         yield TRAVAUX
         assert "950 euros" in texte_de(sortie)
         assert not app.edition.modifie and "•" not in app.title()
@@ -726,7 +726,7 @@ def test_word_save_proposes_pdf_next_to_document(ui, contrat, tmp_path, monkeypa
         yield 300
         corriger_montant(app)
         d.enregistrer_sous = None  # l'utilisateur annule
-        app.enregistrer_edition()
+        app.fonctions["Modifier"].enregistrer_edition()
         options = d.demandes_enregistrer[-1]
         assert options["initialfile"] == "lettre.pdf"
         assert os.path.normcase(options["initialdir"]) == os.path.normcase(str(tmp_path))
@@ -866,7 +866,7 @@ def test_other_pages_use_the_saved_file(ui, contrat, tmp_path):
         yield 300
         corriger_montant(app)
         d.enregistrer_sous = str(sortie)
-        app.enregistrer_edition()
+        app.fonctions["Modifier"].enregistrer_edition()
         yield TRAVAUX
         assert app.chemin_pdf == str(sortie)
         assert app.label_fichier.cget("text") == "corrige.pdf"
@@ -894,7 +894,7 @@ def test_status_tells_which_font_was_used(ui, contrat, monkeypatch, niveau, atte
         yield 300
         cliquer(app, centre_mot(app.apercu.page, "Montant"))
         monkeypatch.setattr(app.edition, "corriger", lambda *a: niveau)
-        app._valider_saisie()
+        app.fonctions["Modifier"]._valider_saisie()
         assert app.etat.cget("text") == attendu
 
     executer(app, scenario)
