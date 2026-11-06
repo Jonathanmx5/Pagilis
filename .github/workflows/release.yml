@@ -20,9 +20,9 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -44,7 +44,7 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Cache des fichiers de langue Tesseract
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tessdata
           key: tessdata-fast-fra-eng-v1
@@ -68,7 +68,7 @@ jobs:
 
       - name: Exe en téléchargement (compilation d'essai)
         if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PDFStudio-essai
           path: dist/PDFStudio.exe
