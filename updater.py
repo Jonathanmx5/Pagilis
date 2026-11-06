@@ -22,7 +22,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 # Dépôt GitHub qui héberge les versions publiées (voir release.py).
 GITHUB_REPO = "Jonathanmx5/PDFStudio"
