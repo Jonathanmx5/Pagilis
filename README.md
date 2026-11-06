@@ -23,6 +23,18 @@ s'appelait PDF Studio. Une installation de PDF Studio qui reçoit la mise à jou
 devient automatiquement Pagilis (nouveau dossier, raccourcis et entrée Windows ;
 l'ancienne installation est retirée), et les préférences sont reprises.
 
+## Limites connues
+
+- Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée (les
+  polices incorporées sont des sous-ensembles). Le texte est réécrit en Arial,
+  Times New Roman ou Courier New selon son style.
+- Pas de recherche à cheval sur deux lignes.
+- Pas de détection des pages à l'envers ou couchées à 90°.
+- Le redressement des pages penchées et le remplacement de texte sur un scan ne
+  sont pas encore disponibles.
+- Un .exe non signé peut être signalé par Windows Defender.
+- Journal d'erreurs : `%LOCALAPPDATA%\Pagilis\pagilis.log`.
+
 ## Développer
 
 ```bat
@@ -57,8 +69,10 @@ git tag v1.2.0-beta.1
 git push origin v1.2.0-beta.1
 ```
 
-Une **bêta** (`-beta.N`) n'est proposée qu'aux utilisateurs qui ont activé
-« Versions bêta ». Quand elle a fait ses preuves, publier `v1.2.0` pour tous.
+Une **bêta** (`-beta.N`) est publiée comme pré-version GitHub : l'application
+ne la propose jamais (seule la dernière version publiée pour tous l'est), on la
+télécharge à la main pour l'essayer. Quand elle a fait ses preuves, publier
+`v1.2.0` pour tous.
 
 Numérotation : CORRECTIF (1.2.1) = corrections seulement ; MINEUR (1.3.0) =
 nouveautés ; MAJEUR (2.0.0) = changements qui cassent des habitudes.

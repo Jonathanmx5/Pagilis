@@ -23,28 +23,6 @@ import pdf_core as core
 import updater
 from apercu import Apercu
 
-# Limites connues, affichées dans « Aide et limites ».
-LIMITES = """Limites connues de Pagilis
-
-• Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée
-  (les polices incorporées sont des sous-ensembles). Le texte est réécrit en
-  Arial, Times New Roman ou Courier New selon son style.
-• Pas de recherche à cheval sur deux lignes.
-• Pas de détection des pages à l'envers ou couchées à 90° (cela demanderait
-  un modèle d'orientation).
-• Le redressement des pages penchées et le remplacement de texte sur un scan
-  ne sont pas encore disponibles.
-• Un .exe non signé peut être signalé par Windows Defender.
-
-Licence : Pagilis est un logiciel libre distribué sous licence
-GNU AGPL-3.0, comme la bibliothèque PyMuPDF qu'il utilise. Il est fourni
-sans aucune garantie. Code source : {source}
-
-Journal d'erreurs : {log}"""
-
-# Dépôt du code source, exigé par l'AGPL pour toute copie distribuée.
-URL_SOURCE = f"https://github.com/{updater.GITHUB_REPO}"
-
 # Dossier de configuration et journal, indispensables avec --noconsole.
 _LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
 DOSSIER_DONNEES = os.path.join(_LOCALAPPDATA, identite.DOSSIER_DONNEES)
@@ -165,9 +143,10 @@ class Pagilis(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._fermer)
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
+        # Seules les versions publiées pour tous sont proposées, jamais les bêtas
+        # (un ancien réglage « canal_beta » est ignoré).
         version_ignoree = self.config_data.get("version_ignoree")
-        beta = bool(self.config_data.get("canal_beta", False))
-        threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree, beta), daemon=True).start()
+        threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree,), daemon=True).start()
 
     # ------------------------------------------------- barre latérale
 
@@ -194,7 +173,7 @@ class Pagilis(ctk.CTk):
             bouton.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
             self.boutons_nav[nom] = bouton
 
-        # Pousse le bas de la barre (installation, thème, aide) tout en bas.
+        # Pousse le bas de la barre (installation, thème) tout en bas.
         bas = 4 + len(FONCTIONS)
         barre.grid_rowconfigure(bas - 1, weight=1)
         # Version portable lancée : on propose de l'installer sur le PC.
@@ -213,15 +192,7 @@ class Pagilis(ctk.CTk):
             command=lambda choix: self._changer_apparence(themes[choix]),
         )
         menu.set(next(k for k, v in themes.items() if v == actuel))
-        menu.grid(row=bas + 1, column=0, sticky="ew", padx=20, pady=(4, 8))
-        # Canal bêta : versions de test, avant leur publication à tous.
-        self.canal_beta = ctk.BooleanVar(value=bool(self.config_data.get("canal_beta", False)))
-        ctk.CTkSwitch(barre, text="Versions bêta", variable=self.canal_beta,
-                      command=lambda: self.config_data.update(canal_beta=self.canal_beta.get())).grid(
-            row=bas + 2, column=0, sticky="w", padx=20, pady=(4, 4))
-        ctk.CTkButton(barre, text="Aide et limites", fg_color="transparent", border_width=1,
-                      text_color=("gray10", "gray90"), command=self.afficher_aide).grid(
-            row=bas + 3, column=0, sticky="ew", padx=20, pady=(4, 20))
+        menu.grid(row=bas + 1, column=0, sticky="ew", padx=20, pady=(4, 20))
         ctk.set_appearance_mode(actuel)
 
     # ------------------------------------------------- installation sur le PC
@@ -286,10 +257,6 @@ class Pagilis(ctk.CTk):
         self.config_data["apparence"] = mode
         self.apercu.changer_theme()
 
-    def afficher_aide(self):
-        messagebox.showinfo("Aide et limites", LIMITES.format(
-            log=os.path.join(DOSSIER_DONNEES, "pagilis.log"), source=URL_SOURCE))
-
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
         for autre, page in self.pages.items():
@@ -311,8 +278,8 @@ class Pagilis(ctk.CTk):
 
     # ------------------------------------------------------ mises à jour
 
-    def _chercher_mise_a_jour(self, version_ignoree: str | None, beta: bool = False):
-        mise_a_jour = updater.check_for_update(beta=beta)
+    def _chercher_mise_a_jour(self, version_ignoree: str | None):
+        mise_a_jour = updater.check_for_update()
         # « Ne plus me proposer cette version » : on se tait pour CETTE version seulement.
         if mise_a_jour and mise_a_jour.version != version_ignoree:
             self.after(0, lambda: self._popup_mise_a_jour(mise_a_jour))

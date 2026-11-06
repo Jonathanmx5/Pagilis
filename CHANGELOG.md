@@ -17,6 +17,9 @@ elle n'a pas de section propre.
 - Si PDF Studio est installé sur votre PC, il devient automatiquement Pagilis :
   nouveaux raccourcis et nouvelle entrée dans « Applications installées »,
   l'ancienne installation est retirée. Vos préférences sont conservées.
+- L'option « Versions bêta » est retirée : seules les versions publiées pour
+  tous sont proposées.
+- Le bouton « Aide et limites » est retiré de la barre latérale.
 
 ## [1.1.0]
 
