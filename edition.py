@@ -59,6 +59,11 @@ class Edition:
         """Déplace les lignes de `rect` (repère affiché). Retourne le nombre de segments."""
         return self._retoucher(lambda: core.move_text_block(self.doc, page, rect, dx, dy))
 
+    def remplacer(self, ancien: str, nouveau: str, casse: bool = False) -> int:
+        """Remplace partout `ancien` par `nouveau` ; retourne le nombre de remplacements."""
+        return self._retoucher(lambda: core.replace_text(self.doc, ancien, nouveau, range(self.doc.page_count),
+                                                         casse, shrink_if_longer=True))
+
     # Gestion des pages (fonction « Pages »), annulable comme les retouches de texte.
 
     def pivoter(self, pages: list[int], angle: int) -> int:

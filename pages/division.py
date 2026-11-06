@@ -13,8 +13,10 @@ from pages.base import PageFonction
 
 class PageDivision(PageFonction):
     nom = "Division"
-    icone = "✂"
-    description = "Découper un PDF en plusieurs fichiers"
+    libelle = "Découper"
+    groupe = "Assembler"
+    icone = "decouper"
+    description = "Découper un PDF en plusieurs fichiers."
 
     def construire(self):
         self.section("Mode de découpe")

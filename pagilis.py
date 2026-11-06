@@ -27,6 +27,7 @@ import fenetres
 import identite
 import installation
 import pdf_core as core
+import theme
 import updater
 from apercu import Apercu
 from edition import Edition
@@ -64,17 +65,16 @@ def sauver_config(config: dict) -> None:
         logging.exception("Impossible d'écrire la configuration")
 
 
-# Fonctions affichées dans la barre latérale : (nom, icône, description).
-FONCTIONS = [(p.nom, p.icone, p.description) for p in PAGES]
+# Fonctions de la barre latérale : (clé, libellé, description).
+FONCTIONS = [(p.nom, p.libelle, p.description) for p in PAGES]
 
 
 class Pagilis(ctk.CTk):
     """Fenêtre principale : fonctions dans une barre à gauche, page de travail à droite."""
 
     def __init__(self):
-        # Apparence sombre, fixe (pas de choix ; un ancien réglage « apparence » est ignoré).
-        ctk.set_appearance_mode("dark")
-        super().__init__()
+        theme.appliquer()  # apparence sombre fixe ; un ancien réglage « apparence » est ignoré
+        super().__init__(fg_color=theme.FOND)
         self.title("Pagilis")
         self.geometry("1280x780")
         self.minsize(1080, 640)
@@ -82,7 +82,7 @@ class Pagilis(ctk.CTk):
         self.dossier_donnees = DOSSIER_DONNEES
         self.dernier_dossier = self.config_data.get("dernier_dossier", os.path.expanduser("~"))
         self.chemin_pdf: str | None = None
-        # Copie de travail du document affiché (retouches de la page « Modifier »).
+        # Copie de travail du document affiché (retouches de « Modifier » et « Pages »).
         self.edition: Edition | None = None
         # PDF issus des conversions Word de la session ; dossier supprimé à la fermeture.
         self.dossier_conversions = tempfile.mkdtemp(prefix="pagilis-word-")
@@ -92,55 +92,48 @@ class Pagilis(ctk.CTk):
         self.travaux_en_cours = 0
 
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self._construire_barre_haut()
         self._construire_barre_laterale()
 
-        # Zone principale : en-tête, formulaire à gauche + aperçu à droite, barre d'état.
-        principal = ctk.CTkFrame(self, fg_color="transparent")
-        principal.grid(row=0, column=1, sticky="nsew", padx=20, pady=16)
+        # Zone de travail : panneau de la fonction à gauche, document à droite.
+        principal = ctk.CTkFrame(self, fg_color=theme.FOND, corner_radius=0)
+        principal.grid(row=1, column=1, sticky="nsew")
         principal.grid_columnconfigure(1, weight=1)
-        principal.grid_rowconfigure(1, weight=1)
-
-        entete = ctk.CTkFrame(principal, fg_color="transparent")
-        entete.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
-        entete.grid_columnconfigure(0, weight=1)
-        self.titre_page = ctk.CTkLabel(entete, text="", font=ctk.CTkFont(size=24, weight="bold"), anchor="w")
-        self.titre_page.grid(row=0, column=0, sticky="w")
-        self.sous_titre_page = ctk.CTkLabel(entete, text="", text_color=("gray40", "gray65"), anchor="w")
-        self.sous_titre_page.grid(row=1, column=0, sticky="w")
-        fichier = ctk.CTkFrame(entete)
-        fichier.grid(row=0, column=1, rowspan=2, sticky="e")
-        self.label_fichier = ctk.CTkLabel(fichier, text="Aucun fichier ouvert", text_color=("gray40", "gray65"))
-        self.label_fichier.pack(side="left", padx=(12, 8), pady=8)
-        ctk.CTkButton(fichier, text="Ouvrir…", width=110, command=self.choisir_pdf).pack(side="left", padx=(0, 8), pady=8)
+        principal.grid_rowconfigure(0, weight=1)
 
         # Aperçu partagé par toutes les fonctions.
-        self.apercu = Apercu(principal, occupe=lambda: self.travaux_en_cours > 0, corner_radius=10)
-        self.apercu.grid(row=1, column=1, sticky="nsew", padx=(12, 0))
+        self.apercu = Apercu(principal, occupe=lambda: self.travaux_en_cours > 0, corner_radius=0,
+                             fg_color=theme.DOCUMENT)
+        self.apercu.grid(row=0, column=1, sticky="nsew")
         self.apercu.on_page = self._page_changee
         self.apercu.on_dessin = self._dessiner_superpositions
         self.apercu.on_appui = self._souris_appui
         self.apercu.on_glisse = self._souris_glisse
         self.apercu.on_relache = self._souris_relache
 
-        # Une page (défilante) par fonction ; une seule est visible à la fois.
+        # Un panneau (défilant) par fonction ; un seul est visible à la fois.
         self.pages: dict[str, ctk.CTkScrollableFrame] = {}
         self.fonctions: dict[str, PageFonction] = {}
         for classe in PAGES:
-            cadre = ctk.CTkScrollableFrame(principal, corner_radius=10, width=380)
+            cadre = ctk.CTkScrollableFrame(principal, corner_radius=0, width=300, fg_color=theme.SURFACE,
+                                           scrollbar_button_color=theme.SURFACE_3,
+                                           scrollbar_button_hover_color=theme.BORDURE)
             cadre.grid_columnconfigure(0, weight=1)
             self.pages[classe.nom] = cadre
             self.fonctions[classe.nom] = classe(self, cadre)
         self.modifier = self.fonctions["Modifier"]
 
-        etat = ctk.CTkFrame(principal, fg_color="transparent")
-        etat.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        # Barre d'état : message, progression.
+        etat = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=30)
+        etat.grid(row=2, column=0, columnspan=2, sticky="ew")
         etat.grid_columnconfigure(0, weight=1)
-        self.etat = ctk.CTkLabel(etat, text="Prêt", anchor="w")
-        self.etat.grid(row=0, column=0, sticky="w")
-        self.barre = ctk.CTkProgressBar(etat, width=220)
+        self.etat = ctk.CTkLabel(etat, text="Prêt", anchor="w", font=theme.police(12), text_color=theme.TEXTE_2)
+        self.etat.grid(row=0, column=0, sticky="w", padx=14, pady=4)
+        self.barre = ctk.CTkProgressBar(etat, width=200, height=6, progress_color=theme.ACCENT,
+                                        fg_color=theme.SURFACE_2)
         self.barre.set(0)
-        self.barre.grid(row=0, column=1, sticky="e")
+        self.barre.grid(row=0, column=1, sticky="e", padx=14)
         self.barre.grid_remove()  # réapparaît pendant les traitements
 
         derniere = self.config_data.get("derniere_page")
@@ -151,6 +144,8 @@ class Pagilis(ctk.CTk):
             self.bind(touche, lambda _e: self.fonctions[self.page_active].touche_annuler())
         for touche in ("<Control-s>", "<Control-S>"):
             self.bind(touche, lambda _e: self.fonctions[self.page_active].touche_enregistrer())
+        for touche in ("<Control-o>", "<Control-O>"):
+            self.bind(touche, lambda _e: self.choisir_pdf())
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
         # Seules les versions publiées pour tous sont proposées, jamais les bêtas
@@ -158,62 +153,102 @@ class Pagilis(ctk.CTk):
         version_ignoree = self.config_data.get("version_ignoree")
         threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree,), daemon=True).start()
 
+    # ------------------------------------------------- barre du haut
+
+    def _construire_barre_haut(self):
+        """Nom de l'application, document ouvert et actions sur le document."""
+        barre = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=52)
+        barre.grid(row=0, column=0, columnspan=2, sticky="ew")
+        barre.grid_columnconfigure(3, weight=1)
+        ctk.CTkLabel(barre, text="Pagilis", font=theme.police(16, gras=True), text_color=theme.TEXTE).grid(
+            row=0, column=0, padx=(18, 18), pady=10)
+        ctk.CTkFrame(barre, width=1, height=22, fg_color=theme.BORDURE).grid(row=0, column=1)
+        ctk.CTkLabel(barre, text="", image=theme.icone("document", 16, theme.TEXTE_2)).grid(
+            row=0, column=2, padx=(16, 6))
+        fichier = ctk.CTkFrame(barre, fg_color="transparent")
+        fichier.grid(row=0, column=3, sticky="w")
+        self.label_fichier = ctk.CTkLabel(fichier, text="Aucun fichier ouvert", font=theme.police(13),
+                                          text_color=theme.TEXTE)
+        self.label_fichier.pack(side="left")
+        # Pastille affichée tant que des retouches ne sont pas enregistrées.
+        self.pastille = ctk.CTkLabel(fichier, text="Non enregistré", font=theme.police(11, gras=True),
+                                     fg_color=theme.ALERTE_FOND, text_color=theme.ALERTE_TEXTE,
+                                     corner_radius=6, height=22, padx=8)
+        self.bouton_annuler = theme.bouton(barre, icone_nom="annuler", style="discret", state="disabled",
+                                           commande=lambda: self.modifier.annuler_retouche())
+        self.bouton_annuler.grid(row=0, column=4, padx=4)
+        theme.bouton(barre, "Ouvrir", self.choisir_pdf, style="secondaire", icone_nom="ouvrir").grid(
+            row=0, column=5, padx=4)
+        self.bouton_enregistrer = theme.bouton(barre, "Enregistrer", style="principal", icone_nom="enregistrer",
+                                               state="disabled", commande=lambda: self.modifier.enregistrer_edition())
+        self.bouton_enregistrer.grid(row=0, column=6, padx=(4, 16))
+
+    def afficher_non_enregistre(self, oui: bool):
+        if oui:
+            self.pastille.pack(side="left", padx=(10, 0))
+        else:
+            self.pastille.pack_forget()
+
     # ------------------------------------------------- barre latérale
 
     def _construire_barre_laterale(self):
-        barre = ctk.CTkFrame(self, width=240, corner_radius=0)
-        barre.grid(row=0, column=0, sticky="nsw")
+        barre = ctk.CTkFrame(self, width=210, corner_radius=0, fg_color=theme.SURFACE)
+        barre.grid(row=1, column=0, sticky="nsw")
         barre.grid_propagate(False)
         barre.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(barre, text="Pagilis", font=ctk.CTkFont(size=22, weight="bold"),
-                     anchor="w").grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 0))
-        ctk.CTkLabel(barre, text=f"Version {updater.APP_VERSION}", text_color=("gray40", "gray60"),
-                     anchor="w").grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
-        ctk.CTkLabel(barre, text="FONCTIONS", font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=("gray45", "gray55"), anchor="w").grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 6))
+        # Séparation discrète avec la zone de travail.
+        ctk.CTkFrame(self, width=1, fg_color=theme.BORDURE, corner_radius=0).grid(row=1, column=0, sticky="nse")
 
         self.boutons_nav: dict[str, ctk.CTkButton] = {}
-        for i, (nom, icone, _description) in enumerate(FONCTIONS):
+        rang, groupe = 0, None
+        for classe in PAGES:
+            if classe.groupe != groupe:
+                groupe = classe.groupe
+                ctk.CTkLabel(barre, text=groupe, font=theme.police(11, gras=True), text_color=theme.TEXTE_DISCRET,
+                             anchor="w").grid(row=rang, column=0, sticky="ew", padx=22, pady=(18 if rang else 14, 4))
+                rang += 1
             bouton = ctk.CTkButton(
-                barre, text=f"{icone}   {nom}", anchor="w", height=40, corner_radius=8,
-                font=ctk.CTkFont(size=14), fg_color="transparent",
-                text_color=("gray10", "gray90"), hover_color=("gray75", "gray30"),
-                command=lambda n=nom: self.afficher_page(n),
+                barre, text=classe.libelle, anchor="w", height=36, corner_radius=6, font=theme.police(13),
+                image=theme.icone(classe.icone, 16, theme.TEXTE_2), compound="left",
+                fg_color="transparent", text_color=theme.TEXTE, hover_color=theme.SURFACE_2,
+                command=lambda n=classe.nom: self.afficher_page(n),
             )
-            bouton.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
-            self.boutons_nav[nom] = bouton
+            bouton.grid(row=rang, column=0, sticky="ew", padx=10, pady=1)
+            self.boutons_nav[classe.nom] = bouton
+            rang += 1
 
-        # Pousse le bouton d'installation tout en bas de la barre.
-        bas = 4 + len(FONCTIONS)
-        barre.grid_rowconfigure(bas - 1, weight=1)
+        # Pousse le bas de la barre (installation, version) tout en bas.
+        barre.grid_rowconfigure(rang, weight=1)
         # Version portable lancée : on propose de l'installer sur le PC.
         if installation.exe_courant() and not installation.tourne_depuis_installation():
-            texte = "Réinstaller sur ce PC" if installation.est_installe() else "⬇  Installer sur ce PC"
-            ctk.CTkButton(barre, text=texte, height=34, fg_color=("#2F9E44", "#2B8A3E"),
-                          hover_color=("#2B8A3E", "#237032"), command=self.proposer_installation).grid(
-                row=bas, column=0, sticky="ew", padx=20, pady=(0, 20))
+            texte = "Réinstaller sur ce PC" if installation.est_installe() else "Installer sur ce PC"
+            theme.bouton(barre, texte, self.proposer_installation, style="secondaire").grid(
+                row=rang + 1, column=0, sticky="ew", padx=14, pady=(0, 8))
+        ctk.CTkLabel(barre, text=f"Version {updater.APP_VERSION}", font=theme.police(11),
+                     text_color=theme.TEXTE_DISCRET, anchor="w").grid(row=rang + 2, column=0, sticky="ew",
+                                                                      padx=22, pady=(0, 12))
 
     def proposer_installation(self):
         fenetres.proposer_installation(self)
 
     def afficher_page(self, nom: str):
-        """Affiche la page d'une fonction et met en évidence son bouton."""
+        """Affiche le panneau d'une fonction et met en évidence son bouton."""
         if nom != self.page_active and not self.fonctions[self.page_active].peut_quitter(self.fonctions[nom]):
             return
         for autre, page in self.pages.items():
             if autre != nom:
                 page.grid_forget()
-        self.pages[nom].grid(row=1, column=0, sticky="nsew")
+        self.pages[nom].grid(row=0, column=0, sticky="nsew")
         self.page_active = nom
         self.apercu.redessiner()
         for autre, bouton in self.boutons_nav.items():
             choisi = autre == nom
+            classe = type(self.fonctions[autre])
             bouton.configure(
-                fg_color=("#3B8ED0", "#1F6AA5") if choisi else "transparent",
-                text_color=("white", "white") if choisi else ("gray10", "gray90"),
+                fg_color=theme.ACCENT_DOUX if choisi else "transparent",
+                image=theme.icone(classe.icone, 16, theme.TEXTE if choisi else theme.TEXTE_2),
+                font=theme.police(13, gras=choisi),
             )
-        self.titre_page.configure(text=nom)
-        self.sous_titre_page.configure(text=self.fonctions[nom].description)
         self.config_data["derniere_page"] = nom
         self.fonctions[nom].montree()
 
@@ -442,7 +477,6 @@ def main() -> None:
                                        DOSSIER_DONNEES)
     if migrer_installation_pdf_studio(arguments):
         return  # la version installée sous le nouveau nom a pris le relais
-    ctk.set_default_color_theme("blue")
     app = Pagilis()
     if installation.tourne_depuis_installation():
         # Après une mise à jour automatique, la version affichée par Windows doit suivre.

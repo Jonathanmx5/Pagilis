@@ -13,8 +13,10 @@ from pages.base import PageFonction
 
 class PageOcr(PageFonction):
     nom = "OCR (scans)"
-    icone = "◎"
-    description = "Rendre un PDF scanné cherchable"
+    libelle = "Reconnaître le texte"
+    groupe = "Outils"
+    icone = "ocr"
+    description = "Rendre un PDF scanné cherchable et copiable."
 
     def construire(self):
         config = self.app.config_data

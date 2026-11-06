@@ -14,8 +14,10 @@ from pages.base import PageFonction
 
 class PageFusion(PageFonction):
     nom = "Fusion"
-    icone = "⧉"
-    description = "Assembler plusieurs PDF dans l'ordre choisi"
+    libelle = "Fusionner"
+    groupe = "Assembler"
+    icone = "fusion"
+    description = "Assembler plusieurs PDF dans l'ordre choisi."
 
     def construire(self):
         self.liste_fusion: list[str] = []

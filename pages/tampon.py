@@ -17,8 +17,10 @@ from pages.base import PageFonction
 
 class PageTampon(PageFonction):
     nom = "Signature / Tampon"
-    icone = "✍"
-    description = "Poser une signature ou un tampon image"
+    libelle = "Signer"
+    groupe = "Éditer"
+    icone = "signer"
+    description = "Poser une signature ou un tampon sur les pages."
 
     def construire(self):
         self.image_tampon: str | None = None

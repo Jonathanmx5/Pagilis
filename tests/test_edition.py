@@ -154,3 +154,12 @@ def test_refused_page_delete_leaves_document_intact(ed3):
     with pytest.raises(core.PagilisError):
         ed3.supprimer([0, 1, 2])
     assert ed3.doc.page_count == 3 and not ed3.peut_annuler
+
+
+def test_replace_all_is_undoable(ed):
+    assert ed.remplacer("fournisseur", "acheteur") == 0  # absent de ce document
+    assert not ed.peut_annuler
+    assert ed.remplacer("Montant", "Total") == 1
+    assert "Total total" in texte(ed.doc) and ed.modifie
+    ed.annuler()
+    assert LIGNE in texte(ed.doc)

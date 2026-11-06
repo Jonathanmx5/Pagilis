@@ -36,8 +36,10 @@ def _plages(indices: list[int]) -> str:
 
 class PageGestionPages(PageCopie):
     nom = "Pages"
-    icone = "▤"
-    description = "Pivoter, supprimer, réordonner, insérer ou extraire des pages"
+    libelle = "Pages"
+    groupe = "Éditer"
+    icone = "pages"
+    description = "Pivoter, supprimer, réordonner, insérer ou extraire des pages."
 
     def construire(self):
         self.selection: set[int] = set()
@@ -59,7 +61,6 @@ class PageGestionPages(PageCopie):
         ctk.CTkButton(ligne, text="Insérer un PDF…", command=self.inserer).pack(
             side="left", fill="x", expand=True, padx=(0, 6))
         ctk.CTkButton(ligne, text="Extraire…", command=self.extraire).pack(side="left", fill="x", expand=True)
-        self.boutons_copie()
         self.section("Toutes les pages")
         self.grille = ctk.CTkFrame(self.cadre, fg_color="transparent")
         self.grille.pack(fill="x", padx=8, pady=(0, 12))

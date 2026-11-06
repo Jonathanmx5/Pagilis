@@ -16,6 +16,8 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image, ImageTk
 
+import theme
+
 ZOOM_MIN, ZOOM_MAX = 0.2, 5.0
 MARGE = 16  # marge autour de la page dans le canevas, en pixels
 
@@ -44,27 +46,38 @@ class Apercu(ctk.CTkFrame):
         self.on_appui = self.on_glisse = self.on_relache = None
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        barre = ctk.CTkFrame(self, fg_color="transparent")
-        barre.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
-        self.bouton_prec = ctk.CTkButton(barre, text="◀", width=36, command=lambda: self.aller(self.index - 1))
-        self.bouton_prec.pack(side="left")
-        self.label_page = ctk.CTkLabel(barre, text="Aucun document", width=130)
-        self.label_page.pack(side="left", padx=6)
-        self.bouton_suiv = ctk.CTkButton(barre, text="▶", width=36, command=lambda: self.aller(self.index + 1))
-        self.bouton_suiv.pack(side="left")
-        ctk.CTkButton(barre, text="Ajuster", width=70, command=self.activer_ajuster).pack(side="right")
-        ctk.CTkButton(barre, text="+", width=36, command=lambda: self.zoomer(1.25)).pack(side="right", padx=(4, 8))
-        self.label_zoom = ctk.CTkLabel(barre, text="", width=52)
-        self.label_zoom.pack(side="right")
-        ctk.CTkButton(barre, text="−", width=36, command=lambda: self.zoomer(0.8)).pack(side="right", padx=4)
-
+        self.grid_rowconfigure(0, weight=1)
         self.canevas = tk.Canvas(self, highlightthickness=0, bd=0)
-        self.canevas.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
-        defil_v = ctk.CTkScrollbar(self, command=self.canevas.yview)
-        defil_v.grid(row=1, column=1, sticky="ns", pady=(0, 8))
-        defil_h = ctk.CTkScrollbar(self, orientation="horizontal", command=self.canevas.xview)
-        defil_h.grid(row=2, column=0, sticky="ew", padx=(8, 0))
+        self.canevas.grid(row=0, column=0, sticky="nsew")
+        defil_v = ctk.CTkScrollbar(self, command=self.canevas.yview, fg_color=theme.DOCUMENT)
+        defil_v.grid(row=0, column=1, sticky="ns")
+        defil_h = ctk.CTkScrollbar(self, orientation="horizontal", command=self.canevas.xview,
+                                   fg_color=theme.DOCUMENT)
+        defil_h.grid(row=1, column=0, sticky="ew")
+
+        # Barre d'outils discrète sous le document : pages à gauche, zoom à droite.
+        barre = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=40)
+        barre.grid(row=2, column=0, columnspan=2, sticky="ew")
+        self.barre_outils = barre
+        self.bouton_prec = theme.bouton(barre, icone_nom="precedent", style="discret",
+                                        commande=lambda: self.aller(self.index - 1))
+        self.bouton_prec.pack(side="left", padx=(10, 2), pady=4)
+        self.entree_page = theme.champ(barre, width=46, justify="center")
+        self.entree_page.pack(side="left", pady=4)
+        self.entree_page.bind("<Return>", lambda _e: self._aller_saisie())
+        self.label_page = ctk.CTkLabel(barre, text="", text_color=theme.TEXTE_2, font=theme.police(13))
+        self.label_page.pack(side="left", padx=(6, 2))
+        self.bouton_suiv = theme.bouton(barre, icone_nom="suivant", style="discret",
+                                        commande=lambda: self.aller(self.index + 1))
+        self.bouton_suiv.pack(side="left", padx=2, pady=4)
+        theme.bouton(barre, "Ajuster", style="discret", icone_nom="ajuster",
+                     commande=self.activer_ajuster).pack(side="right", padx=(2, 10), pady=4)
+        theme.bouton(barre, icone_nom="zoom_plus", style="discret",
+                     commande=lambda: self.zoomer(1.25)).pack(side="right", padx=2, pady=4)
+        self.label_zoom = ctk.CTkLabel(barre, text="", width=52, text_color=theme.TEXTE_2, font=theme.police(13))
+        self.label_zoom.pack(side="right")
+        theme.bouton(barre, icone_nom="zoom_moins", style="discret",
+                     commande=lambda: self.zoomer(0.8)).pack(side="right", padx=2, pady=4)
         self.canevas.configure(yscrollcommand=defil_v.set, xscrollcommand=defil_h.set)
 
         self.canevas.bind("<Configure>", lambda _e: self._planifier_rendu())
@@ -171,7 +184,7 @@ class Apercu(ctk.CTkFrame):
         if self.doc is None:
             self.canevas.create_text(
                 self.canevas.winfo_width() // 2, self.canevas.winfo_height() // 2,
-                text="Ouvrez un PDF pour afficher l'aperçu", fill="gray55", font=("Segoe UI", 12))
+                text="Ouvrez un PDF pour afficher l'aperçu", fill=theme.TEXTE_DISCRET, font=(theme.POLICE, 12))
             return
         largeur, hauteur = self.canevas.winfo_width(), self.canevas.winfo_height()
         if largeur < 20 or hauteur < 20:
@@ -188,7 +201,7 @@ class Apercu(ctk.CTkFrame):
         oy = max(MARGE, (hauteur - pix.height) // 2)
         self.decalage = (ox, oy)
         # Ombre légère sous la page.
-        ombre = "#0d0d0d" if ctk.get_appearance_mode() == "Dark" else "#a8a8a8"
+        ombre = "#0b0b0d"
         self.canevas.create_rectangle(ox + 3, oy + 3, ox + pix.width + 3, oy + pix.height + 3,
                                       fill=ombre, outline="")
         self.canevas.create_image(ox, oy, image=self._image_tk, anchor="nw")
@@ -196,20 +209,30 @@ class Apercu(ctk.CTkFrame):
         self.label_zoom.configure(text=f"{round(self.zoom * 100)} %")
         self.redessiner()
 
+    def _aller_saisie(self):
+        """Numéro de page tapé dans la barre d'outils (1 = première page)."""
+        try:
+            self.aller(int(self.entree_page.get()) - 1)
+        except ValueError:
+            pass
+        self._mettre_a_jour_barre()
+        self.canevas.focus_set()
+
     def _mettre_a_jour_barre(self):
+        self.entree_page.delete(0, "end")
         if self.doc is None:
-            self.label_page.configure(text="Aucun document")
+            self.label_page.configure(text="/ 0")
             self.label_zoom.configure(text="")
         else:
-            self.label_page.configure(text=f"Page {self.index + 1} / {self.doc.page_count}")
+            self.entree_page.insert(0, str(self.index + 1))
+            self.label_page.configure(text=f"/ {self.doc.page_count}")
         n = self.doc.page_count if self.doc is not None else 0
         self.bouton_prec.configure(state="normal" if self.index > 0 else "disabled")
         self.bouton_suiv.configure(state="normal" if self.index < n - 1 else "disabled")
 
     def _appliquer_couleurs(self):
-        """Fond du canevas accordé au thème clair / sombre."""
-        sombre = ctk.get_appearance_mode() == "Dark"
-        self.canevas.configure(bg="#1e1e1e" if sombre else "#d4d4d4")
+        """Fond du canevas : celui du thème."""
+        self.canevas.configure(bg=theme.DOCUMENT)
 
     def destroy(self):
         """Annule un rendu encore planifié : il viserait une fenêtre disparue."""

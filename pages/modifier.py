@@ -11,6 +11,7 @@ import customtkinter as ctk
 import pymupdf as fitz
 
 import pdf_core as core
+import theme
 from pages.copie import PageCopie
 
 # Au-delà de ce déplacement de la souris (pixels écran), un appui devient un
@@ -29,8 +30,10 @@ MESSAGES_POLICE = {
 
 class PageModifier(PageCopie):
     nom = "Modifier"
-    icone = "✎"
-    description = "Corriger ou déplacer du texte, PDF ou Word"
+    libelle = "Modifier le texte"
+    groupe = "Éditer"
+    icone = "modifier"
+    description = "Corriger ou déplacer du texte, dans un PDF ou un document Word."
 
     def construire(self):
         self.saisie: ctk.CTkEntry | None = None  # zone de correction posée sur l'aperçu
@@ -39,19 +42,39 @@ class PageModifier(PageCopie):
         self._fenetre_saisie = None   # élément du canevas qui porte la zone
         # (départ, ligne sous la souris, bloc, point courant si glisser)
         self._geste = None
-        self.section("Document")
-        self.aide("Ouvrez un PDF ou un document Word (converti en PDF ; Microsoft Word "
-                  "ou LibreOffice requis).")
-        ctk.CTkButton(self.cadre, text="Ouvrir…", command=self.app.choisir_pdf).pack(
-            fill="x", padx=12, pady=(4, 4))
-        self.section("Retoucher")
-        self.aide("Cliquez sur une ligne pour la corriger, faites glisser un bloc pour le déplacer.")
-        self.boutons_copie()
+        self.resultats_recherche: dict[int, list[fitz.Rect]] = {}
+        self.section("Dans le document")
+        self.aide("Cliquez sur une ligne pour la corriger : Entrée valide, Échap annule. "
+                  "Faites glisser un bloc de texte pour le déplacer.")
+
+        self.section("Rechercher et remplacer")
+        self.entree_recherche = self.champ("", "")
+        self.entree_recherche.configure(placeholder_text="Rechercher")
+        self.entree_recherche.bind("<Return>", lambda _e: self.rechercher())
+        self.entree_remplacement = self.champ("", "")
+        self.entree_remplacement.configure(placeholder_text="Remplacer par (vide = effacer)")
+        self.casse = ctk.BooleanVar(value=False)
+        self.case(self.cadre, "Respecter les majuscules", self.casse)
+        ligne = self.ligne()
+        theme.bouton(ligne, "Rechercher", self.rechercher, icone_nom="rechercher").pack(
+            side="left", fill="x", expand=True, padx=(0, 6))
+        theme.bouton(ligne, "Tout remplacer", self.remplacer_tout).pack(side="left", fill="x", expand=True)
+        self.cadre_resultats = ctk.CTkFrame(self.cadre, fg_color="transparent")
+        self.cadre_resultats.pack(fill="x", pady=(6, 12))
 
     # ------------------------------------------------------- crochets
 
     def page_changee(self):
         self._fermer_saisie()
+
+    def document_charge(self):
+        self._afficher_resultats({}, silencieux=True)
+        super().document_charge()
+
+    def edition_changee(self):
+        # Après une retouche, les occurrences surlignées ne sont plus à jour.
+        if self.resultats_recherche:
+            self._afficher_resultats({}, silencieux=True)
 
     def avant_traitement(self):
         self._fermer_saisie()  # le document va être lu par un autre thread
@@ -64,6 +87,9 @@ class PageModifier(PageCopie):
 
     def dessiner(self, apercu):
         canevas = apercu.canevas
+        for rect in self.resultats_recherche.get(apercu.index, []):
+            canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#E0A800", width=2,
+                                     fill="#FFD43B", stipple="gray25", tags="superposition")
         if self.saisie is not None:
             if self._contexte_saisie != (apercu.index, apercu.zoom, apercu.decalage):
                 self._fermer_saisie()  # zoom ou page changés : la zone n'est plus à sa place
@@ -155,3 +181,54 @@ class PageModifier(PageCopie):
         message = MESSAGES_POLICE.get(niveau)
         if message:
             self.app.statut(message)
+
+    # ------------------------------------------------------- rechercher et remplacer
+
+    def rechercher(self):
+        if self.edition is None:
+            return self.app.exiger_pdf()
+        cherche = self.entree_recherche.get()
+        if not cherche:
+            return self.app.statut("Saisissez le texte à rechercher.")
+        self._fermer_saisie()
+        self._afficher_resultats(core.find_text_rects(self.edition.doc, cherche, self.casse.get()))
+
+    def _afficher_resultats(self, resultats: dict[int, list[fitz.Rect]], silencieux: bool = False):
+        self.resultats_recherche = resultats
+        for enfant in self.cadre_resultats.winfo_children():
+            enfant.destroy()
+        if silencieux:
+            self.apercu.redessiner()
+            return
+        if not resultats:
+            self.aide("Aucune occurrence. Si ce PDF est un scan, le texte n'est qu'une image : "
+                      "passez d'abord par « Reconnaître le texte ».", parent=self.cadre_resultats)
+            self.app.statut("Aucune occurrence.")
+        else:
+            total = sum(len(r) for r in resultats.values())
+            self.app.statut(f"{total} occurrence(s) sur {len(resultats)} page(s).")
+            pages = sorted(resultats)
+            self.aide(f"{total} occurrence(s) :", parent=self.cadre_resultats)
+            for page in pages[:12]:
+                theme.bouton(self.cadre_resultats, f"Page {page + 1} — {len(resultats[page])}", style="discret",
+                             hauteur=28, anchor="w", commande=lambda page=page: self.apercu.aller(page)).pack(
+                    fill="x", padx=12)
+            if len(pages) > 12:
+                self.aide(f"… et {len(pages) - 12} autre(s) page(s).", parent=self.cadre_resultats)
+            if self.apercu.index not in resultats:
+                self.apercu.aller(pages[0])
+        self.apercu.redessiner()
+
+    def remplacer_tout(self):
+        if self.edition is None:
+            return self.app.exiger_pdf()
+        ancien = self.entree_recherche.get()
+        if not ancien:
+            return self.app.statut("Saisissez le texte à remplacer.")
+        self._fermer_saisie()
+        nouveau, casse = self.entree_remplacement.get(), self.casse.get()
+        n = self.retoucher(lambda: self.edition.remplacer(ancien, nouveau, casse))
+        if n:
+            self.app.statut(f"{n} remplacement(s). Ctrl+Z pour annuler.")
+        elif n == 0:
+            self._afficher_resultats({})

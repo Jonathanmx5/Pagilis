@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 import customtkinter as ctk
 import pymupdf as fitz
 
+import theme
+
 if TYPE_CHECKING:  # pragma: no cover
     from apercu import Apercu
     from pagilis import Pagilis
@@ -22,13 +24,19 @@ if TYPE_CHECKING:  # pragma: no cover
 class PageFonction:
     """Une fonction de la barre latérale : son formulaire et ses gestes dans l'aperçu."""
 
-    nom = ""          # libellé de la barre latérale (clé unique)
-    icone = ""
-    description = ""  # sous-titre affiché en haut de la page
+    nom = ""          # clé unique (préférences, tests)
+    libelle = ""      # nom affiché dans la barre latérale et en tête du panneau
+    groupe = ""       # rubrique de la barre latérale
+    icone = ""        # clé d'icône du thème (theme.ICONES)
+    description = ""  # une phrase sous le titre du panneau
 
     def __init__(self, app: "Pagilis", cadre: ctk.CTkScrollableFrame):
         self.app = app
         self.cadre = cadre
+        ctk.CTkLabel(cadre, text=self.libelle or self.nom, font=theme.police(18, gras=True),
+                     text_color=theme.TEXTE, anchor="w").pack(fill="x", padx=16, pady=(16, 0))
+        ctk.CTkLabel(cadre, text=self.description, font=theme.police(12), text_color=theme.TEXTE_2,
+                     anchor="w", justify="left", wraplength=260).pack(fill="x", padx=16, pady=(2, 4))
         self.construire()
 
     @property
@@ -77,20 +85,27 @@ class PageFonction:
     # -------------------------------------------------- éléments de formulaire
 
     def section(self, titre: str, parent=None):
-        """Petit titre de section dans un formulaire."""
-        ctk.CTkLabel(parent or self.cadre, text=titre.upper(), font=ctk.CTkFont(size=11, weight="bold"),
-                     text_color=("gray45", "gray55"), anchor="w").pack(fill="x", padx=12, pady=(14, 4))
+        """Titre de section dans un formulaire."""
+        ctk.CTkLabel(parent or self.cadre, text=titre, font=theme.police(13, gras=True),
+                     text_color=theme.TEXTE, anchor="w").pack(fill="x", padx=16, pady=(18, 6))
 
     def aide(self, texte: str, parent=None):
-        """Texte explicatif discret, sur plusieurs lignes."""
-        ctk.CTkLabel(parent or self.cadre, text=texte, wraplength=340, justify="left", anchor="w",
-                     text_color=("gray35", "gray65")).pack(fill="x", padx=12, pady=(0, 6))
+        """Texte explicatif, sur plusieurs lignes."""
+        ctk.CTkLabel(parent or self.cadre, text=texte, wraplength=260, justify="left", anchor="w",
+                     font=theme.police(12), text_color=theme.TEXTE_2).pack(fill="x", padx=16, pady=(0, 6))
 
-    def champ(self, libelle: str, defaut: str) -> ctk.CTkEntry:
-        ligne = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        ligne.pack(fill="x", padx=12, pady=2)
-        ctk.CTkLabel(ligne, text=libelle, width=130, anchor="w").pack(side="left")
-        entree = ctk.CTkEntry(ligne)
+    def ligne(self, parent=None) -> ctk.CTkFrame:
+        """Rangée horizontale (boutons, réglages côte à côte)."""
+        cadre = ctk.CTkFrame(parent or self.cadre, fg_color="transparent")
+        cadre.pack(fill="x", padx=16, pady=3)
+        return cadre
+
+    def champ(self, libelle: str, defaut: str, parent=None) -> ctk.CTkEntry:
+        ligne = self.ligne(parent)
+        if libelle:
+            ctk.CTkLabel(ligne, text=libelle, width=96, anchor="w", font=theme.police(13),
+                         text_color=theme.TEXTE_2).pack(side="left")
+        entree = theme.champ(ligne)
         entree.insert(0, defaut)
         entree.pack(side="left", fill="x", expand=True)
         return entree
@@ -102,10 +117,18 @@ class PageFonction:
 
     def case_continuer(self) -> ctk.BooleanVar:
         var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(self.cadre, text="Continuer sur le fichier résultat", variable=var).pack(
-            anchor="w", padx=12, pady=(10, 2))
+        self.case(self.cadre, "Continuer sur le fichier résultat", var)
         return var
 
-    def bouton_action(self, texte: str, commande):
-        ctk.CTkButton(self.cadre, text=texte, height=36, font=ctk.CTkFont(size=14, weight="bold"),
-                      command=commande).pack(fill="x", padx=12, pady=(10, 12))
+    @staticmethod
+    def case(parent, texte: str, variable, commande=None) -> ctk.CTkCheckBox:
+        boite = ctk.CTkCheckBox(parent, text=texte, variable=variable, command=commande, font=theme.police(13),
+                                text_color=theme.TEXTE, fg_color=theme.ACCENT, hover_color=theme.ACCENT_SURVOL,
+                                border_color=theme.BORDURE, checkbox_width=18, checkbox_height=18, corner_radius=4)
+        boite.pack(anchor="w", padx=16, pady=4)
+        return boite
+
+    def bouton_action(self, texte: str, commande, icone_nom: str | None = None):
+        """L'action principale de la page (une seule, en couleur d'accent)."""
+        theme.bouton(self.cadre, texte, commande, style="principal", icone_nom=icone_nom, hauteur=38).pack(
+            fill="x", padx=16, pady=(18, 16))

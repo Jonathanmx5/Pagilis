@@ -13,8 +13,6 @@ import logging
 import os
 from tkinter import filedialog, messagebox
 
-import customtkinter as ctk
-
 from edition import Edition, ecrire_pdf
 from pages.base import PageFonction
 
@@ -27,17 +25,6 @@ class PageCopie(PageFonction):
     @property
     def edition(self) -> Edition | None:
         return self.app.edition
-
-    def boutons_copie(self):
-        """Boutons « Annuler » et « Enregistrer » de la copie de travail."""
-        boutons = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        boutons.pack(fill="x", padx=12, pady=(10, 12))
-        self.bouton_annuler = ctk.CTkButton(boutons, text="Annuler (Ctrl+Z)", state="disabled",
-                                            command=lambda: self.annuler_retouche())
-        self.bouton_annuler.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self.bouton_enregistrer = ctk.CTkButton(boutons, text="Enregistrer (Ctrl+S)", state="disabled",
-                                                command=lambda: self.enregistrer_edition())
-        self.bouton_enregistrer.pack(side="left", fill="x", expand=True)
 
     # ------------------------------------------------------- à redéfinir
 
@@ -92,12 +79,13 @@ class PageCopie(PageFonction):
         return resultat
 
     def maj_etat(self):
-        """Boutons des pages de retouche, et titre de la fenêtre (« • » = non enregistré)."""
+        """Annuler / Enregistrer de la barre du haut, pastille et titre (« • » = non enregistré)."""
         ed = self.edition
+        self.app.bouton_annuler.configure(state="normal" if ed and ed.peut_annuler else "disabled")
+        self.app.bouton_enregistrer.configure(state="normal" if ed and ed.modifie else "disabled")
+        self.app.afficher_non_enregistre(bool(ed and ed.modifie))
         for page in self.app.fonctions.values():
             if isinstance(page, PageCopie):
-                page.bouton_annuler.configure(state="normal" if ed and ed.peut_annuler else "disabled")
-                page.bouton_enregistrer.configure(state="normal" if ed and ed.modifie else "disabled")
                 page.edition_changee()
         if ed and ed.modifie:
             self.app.title(f"Pagilis • {os.path.basename(ed.source)}")

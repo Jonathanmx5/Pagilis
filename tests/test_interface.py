@@ -193,12 +193,12 @@ def test_search_highlights_occurrences_and_lists_pages(ui, contrat):
 
     def scenario():
         app.charger_fichier(str(contrat))
-        app.afficher_page("Remplacer du texte")
-        app.fonctions["Remplacer du texte"].entree_ancien.insert(0, "client")
-        app.fonctions["Remplacer du texte"].rechercher_texte()
-        yield TRAVAUX
-        yield 200
-        assert sorted(app.fonctions["Remplacer du texte"].resultats_recherche) == [0, 1]
+        app.afficher_page("Modifier")
+        m = app.fonctions["Modifier"]
+        m.entree_recherche.insert(0, "client")
+        m.rechercher()
+        yield 300
+        assert sorted(m.resultats_recherche) == [0, 1]
         assert len(superpositions(app)) == 2, "les 2 occurrences de la page 1 doivent être surlignées"
         app.apercu.aller(1)  # page tournée : surlignage aussi
         yield 300
@@ -217,12 +217,34 @@ def test_search_on_scan_suggests_ocr(ui, tmp_path):
 
     def scenario():
         app.charger_fichier(str(scan))
-        app.afficher_page("Remplacer du texte")
-        app.fonctions["Remplacer du texte"].entree_ancien.insert(0, "contrat")
-        app.fonctions["Remplacer du texte"].rechercher_texte()
-        yield TRAVAUX
-        textes = [w.cget("text") for w in app.fonctions["Remplacer du texte"].cadre_resultats.winfo_children()]
-        assert any("OCR" in t for t in textes)
+        app.afficher_page("Modifier")
+        m = app.fonctions["Modifier"]
+        m.entree_recherche.insert(0, "contrat")
+        m.rechercher()
+        yield 100
+        textes = [w.cget("text") for w in m.cadre_resultats.winfo_children()]
+        assert any("Reconnaître le texte" in t for t in textes)
+
+    executer(app, scenario)
+
+
+def test_replace_all_from_modifier_is_undoable(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Modifier")
+        m = app.fonctions["Modifier"]
+        m.entree_recherche.insert(0, "client")
+        m.entree_remplacement.insert(0, "acheteur")
+        m.remplacer_tout()
+        yield 100
+        texte = " ".join(app.edition.doc[0].get_text().split())
+        assert "acheteur accepte" in texte and "client" not in texte
+        assert app.edition.modifie and "4 remplacement(s)" in app.etat.cget("text")
+        m.annuler_retouche()
+        assert "client accepte" in " ".join(app.edition.doc[0].get_text().split())
 
     executer(app, scenario)
 
@@ -252,54 +274,6 @@ def test_stamp_click_drag_then_applied_on_displayed_page(ui, contrat, signature,
         assert not resultat[0].get_images() and resultat[1].get_images(), "tampon sur la page affichée (2)"
         pose = core.to_displayed(resultat[1], resultat[1].get_image_rects(resultat[1].get_images()[0][0])[0])
         assert abs(pose.x0 - rect.x0) < 1 and abs(pose.y0 - rect.y0) < 1
-
-    executer(app, scenario)
-
-
-def test_move_block_on_rotated_page_with_ghost(ui, contrat, tmp_path):
-    s, creer, d = ui
-    app = creer()
-    sortie = tmp_path / "deplace.pdf"
-
-    def scenario():
-        app.charger_fichier(str(contrat))
-        app.afficher_page("Déplacer du texte")
-        app.apercu.aller(1)
-        yield 300
-        bloc = core.text_blocks(app.apercu.page)[-1]
-        centre = fitz.Point((bloc.x0 + bloc.x1) / 2, (bloc.y0 + bloc.y1) / 2)
-        app._souris_appui(centre)  # clic sur un bloc encadré : sélection
-        app._souris_relache(centre)
-        assert app.fonctions["Déplacer du texte"].selection is not None
-        app._souris_appui(centre)  # glisser la sélection : fantôme + décalage
-        app._souris_glisse(centre + (0, 100))
-        app._souris_relache(centre + (0, 100))
-        assert (app.fonctions["Déplacer du texte"].entree_dx.get(), app.fonctions["Déplacer du texte"].entree_dy.get()) == ("0", "100")
-        app.apercu.zoomer(1.25)  # un zoom ne doit PAS effacer la sélection
-        yield 300
-        assert app.fonctions["Déplacer du texte"].selection is not None
-        d.enregistrer_sous = str(sortie)
-        app.fonctions["Déplacer du texte"].lancer_deplacement()
-        yield TRAVAUX
-        page = fitz.open(sortie)[1]
-        mot = [core.to_displayed(page, w[:4]) for w in page.get_text("words") if w[4] == "signe"][0]
-        assert abs(mot.y0 - (bloc.y0 + 100)) < 3
-
-    executer(app, scenario)
-
-
-def test_page_change_clears_selection(ui, contrat):
-    s, creer, d = ui
-    app = creer()
-
-    def scenario():
-        app.charger_fichier(str(contrat))
-        app.afficher_page("Déplacer du texte")
-        yield 300
-        app.fonctions["Déplacer du texte"].selection = fitz.Rect(50, 120, 300, 200)
-        app.apercu.aller(1)
-        yield 100
-        assert app.fonctions["Déplacer du texte"].selection is None and app.fonctions["Déplacer du texte"].entree_zone.get() == ""
 
     executer(app, scenario)
 
@@ -396,8 +370,12 @@ def test_install_button_only_in_portable_mode(ui, monkeypatch, portable, install
 
     def scenario():
         yield 100
-        textes = [w.cget("text") for w in app.winfo_children()[0].winfo_children()
-                  if isinstance(w, s.ctk.CTkButton)]
+        def boutons(widget):
+            for enfant in widget.winfo_children():
+                if isinstance(enfant, s.ctk.CTkButton):
+                    yield enfant
+                yield from boutons(enfant)
+        textes = [w.cget("text") for w in boutons(app)]
         trouves = [t for t in textes if "nstaller sur ce PC" in t]
         if attendu is None:
             assert not trouves
@@ -445,7 +423,7 @@ def test_modifier_is_first_function(ui):
                     pass
             parcourir(enfant)
     parcourir(app.pages["Modifier"])
-    assert "Cliquez sur une ligne pour la corriger, faites glisser un bloc pour le déplacer." in textes
+    assert any("Cliquez sur une ligne pour la corriger" in t and "glisser un bloc" in t for t in textes)
 
 
 def test_open_pdf_creates_working_copy(ui, contrat):
@@ -674,11 +652,11 @@ def test_ctrl_z_undoes_and_disables_button(ui, contrat):
         ouvrir_modifier(app, contrat)
         yield 300
         corriger_montant(app)
-        assert app.fonctions["Modifier"].bouton_annuler.cget("state") == "normal"
+        assert app.bouton_annuler.cget("state") == "normal"
         app.fonctions["Modifier"].annuler_retouche()
         yield 100
         assert "1 200 euros" in " ".join(app.apercu.page.get_text().split())
-        assert app.fonctions["Modifier"].bouton_annuler.cget("state") == "disabled"
+        assert app.bouton_annuler.cget("state") == "disabled"
 
     executer(app, scenario)
 
