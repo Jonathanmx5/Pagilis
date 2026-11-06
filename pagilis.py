@@ -49,8 +49,6 @@ URL_SOURCE = f"https://github.com/{updater.GITHUB_REPO}"
 _LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
 DOSSIER_DONNEES = os.path.join(_LOCALAPPDATA, identite.DOSSIER_DONNEES)
 os.makedirs(DOSSIER_DONNEES, exist_ok=True)
-# Préférences de PDF Studio (nom d'avant la 1.2.0) reprises au premier lancement de Pagilis.
-installation.reprendre_preferences(os.path.join(_LOCALAPPDATA, identite.ANCIEN_DOSSIER_DONNEES), DOSSIER_DONNEES)
 CONFIG = os.path.join(DOSSIER_DONNEES, "config.json")
 logging.basicConfig(
     filename=os.path.join(DOSSIER_DONNEES, "pagilis.log"),
@@ -1204,6 +1202,10 @@ def main() -> None:
         sys.exit(1 if echecs else 0)
     if "--desinstaller" in arguments:
         return desinstaller_avec_confirmation()
+    # Préférences de PDF Studio (nom d'avant la 1.2.0) reprises au premier lancement.
+    # Ici et non à l'import : importer le module (tests) ne doit pas toucher aux vraies données.
+    installation.reprendre_preferences(os.path.join(_LOCALAPPDATA, identite.ANCIEN_DOSSIER_DONNEES),
+                                       DOSSIER_DONNEES)
     if migrer_installation_pdf_studio(arguments):
         return  # la version installée sous le nouveau nom a pris le relais
     ctk.set_appearance_mode("system")
