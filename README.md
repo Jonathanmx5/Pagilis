@@ -58,7 +58,12 @@ python pagilis.py
 ```
 
 - `pdf_core.py` : toute la logique PDF, sans interface (testée).
-- `pagilis.py`, `apercu.py` : l'interface.
+- `pagilis.py` : la fenêtre principale (document ouvert, traitements, barre d'état).
+- `pages/` : une page par fonction de la barre latérale (socle commun dans
+  `pages/base.py`) ; ajouter une fonction = ajouter un fichier et l'inscrire
+  dans `pages/__init__.py`.
+- `apercu.py` : l'aperçu ; `fenetres.py` : mise à jour, installation, désinstallation.
+- `edition.py` : copie de travail de « Modifier » ; `conversion.py` : Word → PDF.
 - `updater.py` : vérification et installation des mises à jour.
 - `installation.py` : installation sur le PC depuis la version portable.
 
