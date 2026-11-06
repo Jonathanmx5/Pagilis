@@ -335,12 +335,12 @@ class PDFStudio(ctk.CTk):
         if mise_a_jour.notes:
             # Les nouveautés : sans elles, l'utilisateur ne sait pas ce qu'il installe.
             notes = ctk.CTkTextbox(popup, height=170, wrap="word")
-            notes.insert("1.0", mise_a_jour.notes)
+            notes.insert("1.0", updater.notes_lisibles(mise_a_jour.notes))
             notes.configure(state="disabled")
             notes.pack(fill="x", padx=20, pady=(0, 10))
+        # Barre affichée seulement pendant le téléchargement (vide, elle montre un point parasite).
         barre = ctk.CTkProgressBar(popup)
         barre.set(0)
-        barre.pack(fill="x", padx=20)
         etat = ctk.CTkLabel(popup, text="")
         etat.pack(pady=6)
         bouton_maj = ctk.CTkButton(popup, text="Mettre à jour")
@@ -353,6 +353,7 @@ class PDFStudio(ctk.CTk):
             bouton_maj.configure(state="disabled")
             bouton_quitter.configure(state="disabled")
             etat.configure(text="Téléchargement…")
+            barre.pack(fill="x", padx=20, before=etat)
             destination = os.path.join(DOSSIER_DONNEES, "PDFStudio_new.exe")
 
             def progression(lu, total):

@@ -35,6 +35,17 @@ def test_version_ordering_with_betas(plus_recente, plus_ancienne):
     assert not updater.is_newer(plus_ancienne, plus_recente)
 
 
+def test_notes_rewrapped_for_display():
+    notes = ("- Plus sûr : une nouvelle version est d'abord vérifiée ; si elle\n"
+             "  ne fonctionne pas, la version actuelle est conservée.\n"
+             "- Exe plus léger.\n"
+             "\n"
+             "- Après une ligne vide.")
+    assert updater.notes_lisibles(notes) == (
+        "- Plus sûr : une nouvelle version est d'abord vérifiée ; si elle ne fonctionne pas, "
+        "la version actuelle est conservée.\n- Exe plus léger.\n\n- Après une ligne vide.")
+
+
 def test_notes_are_passed_to_update():
     manifeste = {"version": "2.0.0", "url": "u", "sha256": "s", "notes": "  - Nouveauté\n"}
     maj = updater.check_for_update("https://x/v.json", "1.0.0", fake_fetch(manifeste))

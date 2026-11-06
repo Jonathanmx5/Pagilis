@@ -89,6 +89,23 @@ def is_newer(remote: str, local: str) -> bool:
     return parse_version(remote) > parse_version(local)
 
 
+def notes_lisibles(notes: str) -> str:
+    """Notes du CHANGELOG -> texte pour la fenêtre de mise à jour.
+
+    Dans le fichier, une puce longue continue sur des lignes indentées (coupure
+    à 80 caractères pour la lecture du fichier). Affichées telles quelles, ces
+    coupures hachent les phrases : on recolle chaque suite à sa puce, et
+    l'affichage fait lui-même le retour à la ligne.
+    """
+    lignes: list[str] = []
+    for ligne in notes.splitlines():
+        if ligne[:1].isspace() and ligne.strip() and lignes:
+            lignes[-1] += " " + ligne.strip()
+        else:
+            lignes.append(ligne.rstrip())
+    return "\n".join(lignes).strip()
+
+
 def _lire_json(url: str):
     requete = urllib.request.Request(url, headers={
         "User-Agent": "PDFStudio-mise-a-jour",  # exigé par l'API GitHub
