@@ -13,6 +13,7 @@ import logging
 import os
 from tkinter import filedialog, messagebox
 
+import theme
 from edition import Edition, ecrire_pdf
 from pages.base import PageFonction
 
@@ -81,8 +82,8 @@ class PageCopie(PageFonction):
     def maj_etat(self):
         """Annuler / Enregistrer de la barre du haut, pastille et titre (« • » = non enregistré)."""
         ed = self.edition
-        self.app.bouton_annuler.configure(state="normal" if ed and ed.peut_annuler else "disabled")
-        self.app.bouton_enregistrer.configure(state="normal" if ed and ed.modifie else "disabled")
+        theme.activer(self.app.bouton_annuler, bool(ed and ed.peut_annuler), "discret")
+        theme.activer(self.app.bouton_enregistrer, bool(ed and ed.modifie), "principal")
         self.app.afficher_non_enregistre(bool(ed and ed.modifie))
         for page in self.app.fonctions.values():
             if isinstance(page, PageCopie):

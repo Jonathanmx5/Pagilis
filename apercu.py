@@ -59,7 +59,7 @@ class Apercu(ctk.CTkFrame):
         barre = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=40)
         barre.grid(row=2, column=0, columnspan=2, sticky="ew")
         self.barre_outils = barre
-        self.bouton_prec = theme.bouton(barre, icone_nom="precedent", style="discret",
+        self.bouton_prec = theme.bouton(barre, icone_nom="precedent", style="discret", bulle="Page précédente",
                                         commande=lambda: self.aller(self.index - 1))
         self.bouton_prec.pack(side="left", padx=(10, 2), pady=4)
         self.entree_page = theme.champ(barre, width=46, justify="center")
@@ -67,16 +67,16 @@ class Apercu(ctk.CTkFrame):
         self.entree_page.bind("<Return>", lambda _e: self._aller_saisie())
         self.label_page = ctk.CTkLabel(barre, text="", text_color=theme.TEXTE_2, font=theme.police(13))
         self.label_page.pack(side="left", padx=(6, 2))
-        self.bouton_suiv = theme.bouton(barre, icone_nom="suivant", style="discret",
+        self.bouton_suiv = theme.bouton(barre, icone_nom="suivant", style="discret", bulle="Page suivante",
                                         commande=lambda: self.aller(self.index + 1))
         self.bouton_suiv.pack(side="left", padx=2, pady=4)
         theme.bouton(barre, "Ajuster", style="discret", icone_nom="ajuster",
                      commande=self.activer_ajuster).pack(side="right", padx=(2, 10), pady=4)
-        theme.bouton(barre, icone_nom="zoom_plus", style="discret",
+        theme.bouton(barre, icone_nom="zoom_plus", style="discret", bulle="Agrandir (Ctrl+molette)",
                      commande=lambda: self.zoomer(1.25)).pack(side="right", padx=2, pady=4)
         self.label_zoom = ctk.CTkLabel(barre, text="", width=52, text_color=theme.TEXTE_2, font=theme.police(13))
         self.label_zoom.pack(side="right")
-        theme.bouton(barre, icone_nom="zoom_moins", style="discret",
+        theme.bouton(barre, icone_nom="zoom_moins", style="discret", bulle="Réduire (Ctrl+molette)",
                      commande=lambda: self.zoomer(0.8)).pack(side="right", padx=2, pady=4)
         self.canevas.configure(yscrollcommand=defil_v.set, xscrollcommand=defil_h.set)
 

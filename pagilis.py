@@ -111,6 +111,10 @@ class Pagilis(ctk.CTk):
         self.apercu.on_appui = self._souris_appui
         self.apercu.on_glisse = self._souris_glisse
         self.apercu.on_relache = self._souris_relache
+        # Écran d'accueil, à la place du document tant qu'aucun n'est ouvert.
+        self.accueil = ctk.CTkFrame(principal, fg_color=theme.DOCUMENT, corner_radius=0)
+        self.accueil.grid(row=0, column=1, sticky="nsew")
+        self.boutons_recents: list[str] = []
 
         # Un panneau (défilant) par fonction ; un seul est visible à la fois.
         self.pages: dict[str, ctk.CTkScrollableFrame] = {}
@@ -130,12 +134,16 @@ class Pagilis(ctk.CTk):
         etat.grid_columnconfigure(0, weight=1)
         self.etat = ctk.CTkLabel(etat, text="Prêt", anchor="w", font=theme.police(12), text_color=theme.TEXTE_2)
         self.etat.grid(row=0, column=0, sticky="w", padx=14, pady=4)
+        self.zone_actions = ctk.CTkFrame(etat, fg_color="transparent", height=26, width=1)
+        self.zone_actions.grid(row=0, column=1, sticky="e")
+        self.actions_notification = {}
         self.barre = ctk.CTkProgressBar(etat, width=200, height=6, progress_color=theme.ACCENT,
                                         fg_color=theme.SURFACE_2)
         self.barre.set(0)
-        self.barre.grid(row=0, column=1, sticky="e", padx=14)
+        self.barre.grid(row=0, column=2, sticky="e", padx=14)
         self.barre.grid_remove()  # réapparaît pendant les traitements
 
+        self.afficher_accueil()
         derniere = self.config_data.get("derniere_page")
         self.afficher_page(derniere if derniere in self.pages else FONCTIONS[0][0])
         self.protocol("WM_DELETE_WINDOW", self._fermer)
@@ -175,13 +183,17 @@ class Pagilis(ctk.CTk):
                                      fg_color=theme.ALERTE_FOND, text_color=theme.ALERTE_TEXTE,
                                      corner_radius=6, height=22, padx=8)
         self.bouton_annuler = theme.bouton(barre, icone_nom="annuler", style="discret", state="disabled",
+                                           bulle="Annuler la dernière retouche (Ctrl+Z)",
                                            commande=lambda: self.modifier.annuler_retouche())
         self.bouton_annuler.grid(row=0, column=4, padx=4)
-        theme.bouton(barre, "Ouvrir", self.choisir_pdf, style="secondaire", icone_nom="ouvrir").grid(
+        theme.bouton(barre, "Ouvrir", self.choisir_pdf, style="secondaire", icone_nom="ouvrir",
+                     bulle="Ouvrir un PDF ou un document Word (Ctrl+O)").grid(
             row=0, column=5, padx=4)
         self.bouton_enregistrer = theme.bouton(barre, "Enregistrer", style="principal", icone_nom="enregistrer",
+                                               bulle="Enregistrer les retouches (Ctrl+S)",
                                                state="disabled", commande=lambda: self.modifier.enregistrer_edition())
         self.bouton_enregistrer.grid(row=0, column=6, padx=(4, 16))
+        theme.activer(self.bouton_enregistrer, False, "principal")
 
     def afficher_non_enregistre(self, oui: bool):
         if oui:
@@ -230,6 +242,40 @@ class Pagilis(ctk.CTk):
 
     def proposer_installation(self):
         fenetres.proposer_installation(self)
+
+    # ------------------------------------------------- accueil
+
+    def afficher_accueil(self):
+        """Invitation à ouvrir un document, et les derniers fichiers ouverts."""
+        for enfant in self.accueil.winfo_children():
+            enfant.destroy()
+        centre = ctk.CTkFrame(self.accueil, fg_color="transparent")
+        centre.place(relx=0.5, rely=0.42, anchor="center")
+        ctk.CTkLabel(centre, text="", image=theme.icone("document", 44, theme.TEXTE_DISCRET)).pack(pady=(0, 14))
+        ctk.CTkLabel(centre, text="Ouvrez un document pour commencer", font=theme.police(20, gras=True),
+                     text_color=theme.TEXTE).pack()
+        ctk.CTkLabel(centre, text="Un PDF ou un document Word. Raccourci : Ctrl+O.", font=theme.police(13),
+                     text_color=theme.TEXTE_2).pack(pady=(4, 18))
+        theme.bouton(centre, "Ouvrir un fichier", self.choisir_pdf, style="principal", icone_nom="ouvrir",
+                     hauteur=40, largeur=220).pack()
+        self.boutons_recents = [c for c in self.config_data.get("recents", []) if os.path.isfile(c)][:6]
+        if self.boutons_recents:
+            ctk.CTkLabel(centre, text="Récents", font=theme.police(13, gras=True), text_color=theme.TEXTE,
+                         anchor="w").pack(fill="x", pady=(28, 6))
+            for chemin in self.boutons_recents:
+                ligne = ctk.CTkButton(
+                    centre, text=f"{os.path.basename(chemin)}    {os.path.dirname(chemin)}", anchor="w",
+                    width=420, height=34, corner_radius=6, font=theme.police(13), fg_color="transparent",
+                    hover_color=theme.SURFACE_2, text_color=theme.TEXTE,
+                    image=theme.icone("document", 16, theme.TEXTE_2), compound="left",
+                    command=lambda c=chemin: self.ouvrir_document(c))
+                ligne.pack(fill="x")
+        self.accueil.grid()
+        self.accueil.tkraise()
+
+    def _retenir_recent(self, chemin: str):
+        recents = [c for c in self.config_data.get("recents", []) if os.path.normcase(c) != os.path.normcase(chemin)]
+        self.config_data["recents"] = [chemin] + recents[:9]
 
     def afficher_page(self, nom: str):
         """Affiche le panneau d'une fonction et met en évidence son bouton."""
@@ -300,7 +346,8 @@ class Pagilis(ctk.CTk):
         if self.occupe() or not self.modifier.confirmer_abandon():
             return
         if not conversion.est_word(chemin):
-            self.charger_fichier(chemin)
+            if self.charger_fichier(chemin):
+                self._retenir_recent(chemin)
             return
         dossier = self.dossier_conversions
 
@@ -308,6 +355,7 @@ class Pagilis(ctk.CTk):
             if self.charger_fichier(pdf):
                 self.edition = Edition(self.apercu.doc, chemin, origine_word=True)
                 self.label_fichier.configure(text=os.path.basename(chemin))
+                self._retenir_recent(chemin)
 
         self.statut("Conversion du document Word…")
         self.lancer(lambda _p: conversion.word_vers_pdf(chemin, dossier), fin=fin)
@@ -340,6 +388,8 @@ class Pagilis(ctk.CTk):
         self.chemin_pdf = chemin
         self.label_fichier.configure(text=os.path.basename(chemin))
         self.apercu.charger(doc)
+        self.accueil.grid_remove()
+        self._effacer_actions()
         # Nouvelle copie de travail (page « Modifier ») sur le document affiché.
         self.edition = Edition(doc, chemin)
         for page in self.fonctions.values():
@@ -427,18 +477,42 @@ class Pagilis(ctk.CTk):
             filetypes=[("PDF", "*.pdf")],
         ) or None
 
-    def proposer_ouverture(self, chemin: str):
-        if messagebox.askyesno("Pagilis", "Ouvrir le résultat ?"):
-            os.startfile(chemin)  # noqa: S606 - Windows uniquement
+    # ------------------------------------------------- notification
 
-    def apres_sauvegarde(self, sortie: str, continuer: ctk.BooleanVar, message: str = "Terminé."):
-        """Après un traitement : statut, « Continuer sur le fichier résultat », ouvrir le résultat."""
+    def notifier(self, message: str, actions: list[tuple[str, object]] = ()):
+        """Message dans la barre d'état, avec des actions facultatives (sans bloquer le travail)."""
         self.statut(message)
-        if continuer.get():
-            page = self.apercu.index
-            self.charger_fichier(sortie)
-            self.apercu.aller(page)  # reste sur la page où l'on travaillait
-        self.proposer_ouverture(sortie)
+        self._effacer_actions()
+        for libelle, action in actions:
+            self.actions_notification[libelle] = action
+            theme.bouton(self.zone_actions, libelle, lambda libelle=libelle: self.action_notification(libelle),
+                         style="secondaire", hauteur=24).pack(side="left", padx=(0, 6))
+
+    def action_notification(self, libelle: str):
+        action = self.actions_notification.get(libelle)
+        self._effacer_actions()
+        if action:
+            action()
+
+    def _effacer_actions(self):
+        self.actions_notification: dict[str, object] = {}
+        for enfant in self.zone_actions.winfo_children():
+            enfant.destroy()
+
+    def proposer_ouverture(self, chemin: str, message: str = "Terminé."):
+        """Résultat enregistré : « Ouvrir » l'affiche dans le lecteur PDF de Windows."""
+        self.notifier(message, [("Ouvrir", lambda: os.startfile(chemin))])  # noqa: S606 - Windows
+
+    def apres_sauvegarde(self, sortie: str, message: str = "Terminé."):
+        """Après un traitement : ouvrir le résultat, ou continuer à travailler dessus."""
+        self.notifier(message, [("Ouvrir", lambda: os.startfile(sortie)),  # noqa: S606 - Windows
+                                ("Continuer dessus", lambda: self.continuer_sur(sortie))])
+
+    def continuer_sur(self, chemin: str):
+        """Le résultat devient le document ouvert, à la même page."""
+        page = self.apercu.index
+        if self.charger_fichier(chemin):
+            self.apercu.aller(page)
 
     # ------------------------------------------------- aperçu : répartition vers les pages
 

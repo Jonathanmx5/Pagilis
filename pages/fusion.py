@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 import pdf_core as core
+import theme
 from pages.base import PageFonction
 
 
@@ -22,35 +23,34 @@ class PageFusion(PageFonction):
     def construire(self):
         self.liste_fusion: list[str] = []
         self.selection_fusion: int | None = None
-        self.section("Fichiers à fusionner")
-        self.aide("Cliquez sur un fichier pour le sélectionner, puis changez sa place. "
-                  "Chaque fichier devient un signet ; ses signets d'origine sont conservés.")
-        self.cadre_fusion = ctk.CTkFrame(self.cadre)
-        self.cadre_fusion.pack(fill="x", padx=12, pady=4)
-        boutons = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        boutons.pack(fill="x", padx=12, pady=4)
-        ctk.CTkButton(boutons, text="Ajouter…", width=80, command=self.ajouter_fusion).pack(side="left")
-        for texte, commande in [("▲", lambda: self.deplacer_fusion(-1)), ("▼", lambda: self.deplacer_fusion(1)),
-                                ("Retirer", self.retirer_fusion), ("Vider", self.vider_fusion)]:
-            ctk.CTkButton(boutons, text=texte, width=36 if len(texte) == 1 else 70, fg_color="gray50",
-                          hover_color="gray40", command=commande).pack(side="left", padx=(6, 0))
-        self.bouton_action("Fusionner…", self.lancer_fusion)
+        self.section("Fichiers à assembler")
+        self.aide("Dans l'ordre de la liste. Chaque fichier devient un signet ; ses signets sont conservés.")
+        self.cadre_fusion = ctk.CTkFrame(self.cadre, fg_color=theme.SURFACE_2, corner_radius=8)
+        self.cadre_fusion.pack(fill="x", padx=16, pady=4)
+        ligne = self.ligne()
+        theme.bouton(ligne, "Ajouter des PDF…", self.ajouter_fusion, icone_nom="ajouter").pack(side="left")
+        for icone_nom, commande, bulle in (("monter", lambda: self.deplacer_fusion(-1), "Monter"),
+                                           ("descendre", lambda: self.deplacer_fusion(1), "Descendre"),
+                                           ("supprimer", self.retirer_fusion, "Retirer de la liste")):
+            theme.bouton(ligne, icone_nom=icone_nom, style="discret", commande=commande,
+                         bulle=bulle).pack(side="left", padx=(4, 0))
+        theme.bouton(ligne, "Vider", self.vider_fusion, style="discret").pack(side="right")
+        self.bouton_action("Fusionner", self.lancer_fusion, icone_nom="fusion")
         self._rafraichir_fusion()
 
     def _rafraichir_fusion(self):
         for enfant in self.cadre_fusion.winfo_children():
             enfant.destroy()
         if not self.liste_fusion:
-            ctk.CTkLabel(self.cadre_fusion, text="Aucun fichier. Cliquez sur « Ajouter… ».",
-                         text_color=("gray40", "gray60")).pack(padx=10, pady=14)
+            ctk.CTkLabel(self.cadre_fusion, text="Aucun fichier pour l'instant.", font=theme.police(12),
+                         text_color=theme.TEXTE_DISCRET).pack(padx=10, pady=16)
             return
         for i, chemin in enumerate(self.liste_fusion):
             choisi = i == self.selection_fusion
             ctk.CTkButton(
                 self.cadre_fusion, text=f"{i + 1}.  {os.path.basename(chemin)}", anchor="w", height=30,
-                fg_color=("#3B8ED0", "#1F6AA5") if choisi else "transparent",
-                text_color=("white", "white") if choisi else ("gray10", "gray90"),
-                hover_color=("gray75", "gray30"),
+                corner_radius=6, font=theme.police(13), fg_color=theme.ACCENT_DOUX if choisi else "transparent",
+                text_color=theme.TEXTE, hover_color=theme.SURFACE_3,
                 command=lambda i=i: self._choisir_fusion(i),
             ).pack(fill="x", padx=4, pady=1)
 
@@ -97,4 +97,4 @@ class PageFusion(PageFonction):
             return
         self.app.statut("Fusion en cours…")
         self.app.lancer(lambda p: core.merge_pdfs(fichiers, sortie, p),
-                        fin=lambda _: self.app.proposer_ouverture(sortie))
+                        fin=lambda _: self.app.proposer_ouverture(sortie, "Fusion terminée."))

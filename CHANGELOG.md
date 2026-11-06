@@ -11,6 +11,24 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.6.0]
+
+- Nouvelle présentation, plus claire et plus professionnelle : police et icônes
+  de Windows, une seule couleur pour l'action principale, et le document au
+  centre de la fenêtre.
+- Barre du haut : le document ouvert, une pastille « Non enregistré » et les
+  boutons Ouvrir, Annuler et Enregistrer (Ctrl+O, Ctrl+Z, Ctrl+S).
+- Fonctions regroupées : Éditer (Modifier le texte, Pages, Signer), Assembler
+  (Fusionner, Découper), Outils (Reconnaître le texte).
+- « Remplacer du texte » et « Déplacer du texte » rejoignent « Modifier le
+  texte » : rechercher et remplacer dans tout le document, annulable.
+- Écran d'accueil avec les fichiers récents ; numéro de page à taper sous
+  l'aperçu ; bulles d'aide sur les boutons à icône.
+- Réglages en mots simples (langue « Français », précision « Standard »…) ;
+  les réglages techniques sont rangés dans « Options avancées ».
+- Plus de fenêtre « Ouvrir le résultat ? » après chaque traitement : la barre
+  d'état propose « Ouvrir » ou « Continuer dessus ».
+
 ## [1.5.0]
 
 - Nouvelle fonction « Pages » : les vignettes de toutes les pages, pour

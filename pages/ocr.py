@@ -8,7 +8,13 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 import pdf_core as core
+import theme
 from pages.base import PageFonction
+
+# Langues proposées (nom affiché -> code Tesseract) et précision (-> résolution en dpi).
+LANGUES = {"Français": "fra", "Anglais": "eng", "Allemand": "deu", "Espagnol": "spa", "Italien": "ita"}
+AUCUNE = "Aucune"
+QUALITES = {"Rapide": 200, "Standard": 300, "Fine": 400}
 
 
 class PageOcr(PageFonction):
@@ -20,56 +26,58 @@ class PageOcr(PageFonction):
 
     def construire(self):
         config = self.app.config_data
-        self.section("Langues")
-        langues = ["fra", "eng", "deu", "spa", "ita"]
-        self.langue_ocr = ctk.StringVar(value=config.get("langue_ocr", "fra"))
-        self.langue2_ocr = ctk.StringVar(value=config.get("langue2_ocr", "aucune"))
-        for libelle, var, valeurs in [("Langue", self.langue_ocr, langues),
-                                      ("2ᵉ langue", self.langue2_ocr, ["aucune"] + langues)]:
-            ligne = ctk.CTkFrame(self.cadre, fg_color="transparent")
-            ligne.pack(fill="x", padx=12, pady=2)
-            ctk.CTkLabel(ligne, text=libelle, width=130, anchor="w").pack(side="left")
-            ctk.CTkOptionMenu(ligne, values=valeurs, variable=var).pack(side="left", fill="x", expand=True)
-        self.section("Options")
-        self.dpi_ocr = ctk.StringVar(value="300")
-        ligne = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        ligne.pack(fill="x", padx=12, pady=2)
-        ctk.CTkLabel(ligne, text="Résolution (dpi)", width=130, anchor="w").pack(side="left")
-        ctk.CTkSegmentedButton(ligne, values=["200", "300", "400"], variable=self.dpi_ocr).pack(
-            side="left", fill="x", expand=True)
-        self.entree_pages_ocr = self.champ("Pages", "")
-        self.entree_pages_ocr.configure(placeholder_text="vide = toutes")
-        self.ignorer_texte = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(self.cadre, text="Ignorer les pages qui ont déjà du texte",
-                        variable=self.ignorer_texte).pack(anchor="w", padx=12, pady=(8, 2))
+        nom_de = {code: nom for nom, code in LANGUES.items()}
+        self.section("Langue du document")
+        self.langue = ctk.StringVar(value=nom_de.get(config.get("langue_ocr", "fra"), "Français"))
+        self.langue2 = ctk.StringVar(value=nom_de.get(config.get("langue2_ocr"), AUCUNE))
+        self._menu("Langue", list(LANGUES), self.langue)
+        self._menu("2ᵉ langue", [AUCUNE] + list(LANGUES), self.langue2)
+        self.section("Reconnaissance")
+        self.qualite = ctk.StringVar(value="Standard")
+        self.segments("Précision", list(QUALITES), self.qualite)
+        self.aide("« Fine » reconnaît mieux les petits caractères, mais prend plus de temps.")
         self.encadrer_mots = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(self.cadre, text="Encadrer les mots reconnus dans l'aperçu", variable=self.encadrer_mots,
-                        command=self.apercu.redessiner).pack(anchor="w", padx=12, pady=2)
-        self.section("Fichiers de langue")
-        self.entree_tessdata = self.champ("Dossier tessdata", config.get("tessdata", ""))
-        self.entree_tessdata.configure(placeholder_text="automatique")
-        self.continuer_ocr = self.case_continuer()
-        self.bouton_action("Lancer l'OCR…", self.lancer_ocr)
+        self.case(self.cadre, "Montrer les mots reconnus", self.encadrer_mots, commande=self.apercu.redessiner)
+
+        avance = self.options_avancees()
+        self.entree_pages_ocr = self.champ("Pages", "", parent=avance)
+        self.entree_pages_ocr.configure(placeholder_text="Toutes")
+        self.ignorer_texte = ctk.BooleanVar(value=True)
+        self.case(avance, "Ignorer les pages qui ont déjà du texte", self.ignorer_texte)
+        self.aide("Dossier des fichiers de langue Tesseract (.traineddata), si Pagilis ne les trouve pas.",
+                  parent=avance)
+        self.entree_tessdata = self.champ("Dossier", config.get("tessdata", ""), parent=avance)
+        self.entree_tessdata.configure(placeholder_text="Automatique")
+        self.bouton_action("Reconnaître le texte", self.lancer_ocr, icone_nom="ocr")
+
+    def _menu(self, libelle: str, valeurs: list[str], variable):
+        ligne = self.ligne()
+        ctk.CTkLabel(ligne, text=libelle, width=96, anchor="w", font=theme.police(13),
+                     text_color=theme.TEXTE_2).pack(side="left")
+        ctk.CTkOptionMenu(ligne, values=valeurs, variable=variable, height=32, corner_radius=6,
+                          font=theme.police(13), dropdown_font=theme.police(13), fg_color=theme.SURFACE_2,
+                          button_color=theme.SURFACE_3, button_hover_color=theme.BORDURE, text_color=theme.TEXTE,
+                          dropdown_fg_color=theme.SURFACE_2, dropdown_hover_color=theme.ACCENT_DOUX,
+                          dropdown_text_color=theme.TEXTE).pack(side="left", fill="x", expand=True)
 
     def dessiner(self, apercu):
         if self.encadrer_mots.get():
             for rect in core.word_rects(apercu.page):
-                apercu.canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#2F9E44",
+                apercu.canevas.create_rectangle(*apercu.rect_canevas(rect), outline=theme.SUCCES,
                                                 tags="superposition")
 
     def lancer_ocr(self):
         if not self.app.exiger_pdf():
             return
-        langue = self.langue_ocr.get()
-        if self.langue2_ocr.get() not in ("aucune", langue):
-            langue += "+" + self.langue2_ocr.get()
-        dpi = int(self.dpi_ocr.get())
+        code = LANGUES.get(self.langue.get(), "fra")
+        code2 = LANGUES.get(self.langue2.get())
+        langue = code + (f"+{code2}" if code2 and code2 != code else "")
+        dpi = QUALITES[self.qualite.get()]
         plage = self.entree_pages_ocr.get().strip()
         tessdata = self.entree_tessdata.get().strip() or None
         ignorer = self.ignorer_texte.get()
         # Préférences mémorisées pour les prochaines fois.
-        self.app.config_data.update(langue_ocr=self.langue_ocr.get(), langue2_ocr=self.langue2_ocr.get(),
-                                    tessdata=tessdata or "")
+        self.app.config_data.update(langue_ocr=code, langue2_ocr=code2 or "aucune", tessdata=tessdata or "")
         if core.find_tessdata(tessdata) is None:
             return messagebox.showwarning("Pagilis", "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
                                                         "Indiquez le dossier « tessdata » qui les contient.")
@@ -97,4 +105,4 @@ class PageOcr(PageFonction):
             return messagebox.showinfo("Pagilis", "Aucune page à traiter : toutes contiennent déjà du texte.\n"
                                                      "Décochez « Ignorer les pages qui ont déjà du texte » pour forcer.")
         self.encadrer_mots.set(True)
-        self.app.apres_sauvegarde(sortie, self.continuer_ocr, f"OCR terminé sur {n} page(s).")
+        self.app.apres_sauvegarde(sortie, f"Texte reconnu sur {n} page(s).")

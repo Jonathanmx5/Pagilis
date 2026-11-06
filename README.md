@@ -23,14 +23,30 @@ s'appelait PDF Studio. Une installation de PDF Studio qui reçoit la mise à jou
 devient automatiquement Pagilis (nouveau dossier, raccourcis et entrée Windows ;
 l'ancienne installation est retirée), et les préférences sont reprises.
 
+## Les fonctions
+
+La barre latérale regroupe les fonctions :
+
+- **Éditer** : *Modifier le texte*, *Pages*, *Signer* ;
+- **Assembler** : *Fusionner*, *Découper* ;
+- **Outils** : *Reconnaître le texte* (OCR des scans).
+
+La barre du haut porte le document ouvert et ses actions : **Ouvrir** (Ctrl+O),
+**Annuler** (Ctrl+Z), **Enregistrer** (Ctrl+S). Une pastille « Non enregistré »
+signale les retouches en attente. Sans document, l'accueil propose d'en ouvrir
+un et liste les fichiers récents. Après un traitement, la barre d'état propose
+d'**Ouvrir** le résultat ou de **Continuer dessus**, sans interrompre le travail.
+
 ## Modifier un PDF ou un Word
 
-Fonction **Modifier** : ouvrir un PDF ou un document Word, puis dans l'aperçu
-cliquer sur une ligne pour la corriger (Entrée pour valider, Échap pour
-abandonner) ou faire glisser un bloc pour le déplacer. Ctrl+Z annule les 20
-dernières retouches, Ctrl+S enregistre en PDF (pour un Word : `<nom>.pdf` à
-côté du document). Un Word est converti avec Microsoft Word, ou LibreOffice
-s'il n'y a pas Word ; sans l'un des deux, il ne peut pas être ouvert.
+Fonction **Modifier le texte** : ouvrir un PDF ou un document Word, puis dans
+l'aperçu cliquer sur une ligne pour la corriger (Entrée pour valider, Échap pour
+abandonner) ou faire glisser un bloc pour le déplacer. « Rechercher et
+remplacer » surligne les occurrences et les remplace dans tout le document.
+Ctrl+Z annule les 20 dernières retouches, Ctrl+S enregistre en PDF (pour un
+Word : `<nom>.pdf` à côté du document). Un Word est converti avec Microsoft
+Word, ou LibreOffice s'il n'y a pas Word ; sans l'un des deux, il ne peut pas
+être ouvert.
 
 ## Gérer les pages
 
@@ -71,6 +87,8 @@ python pagilis.py
   `pages/base.py`) ; ajouter une fonction = ajouter un fichier et l'inscrire
   dans `pages/__init__.py`.
 - `apercu.py` : l'aperçu ; `fenetres.py` : mise à jour, installation, désinstallation.
+- `theme.py` : couleurs, polices (Segoe UI), icônes (Segoe MDL2 Assets) et boutons ;
+  aucune couleur ni police n'est écrite ailleurs.
 - `edition.py` : copie de travail de « Modifier » ; `conversion.py` : Word → PDF.
 - `updater.py` : vérification et installation des mises à jour.
 - `installation.py` : installation sur le PC depuis la version portable.

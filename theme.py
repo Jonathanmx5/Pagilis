@@ -91,7 +91,8 @@ _STYLES = {
 
 
 def bouton(parent, texte: str = "", commande=None, style: str = "secondaire", icone_nom: str | None = None,
-           largeur: int = 0, hauteur: int = 32, miroir: bool = False, **options) -> ctk.CTkButton:
+           largeur: int = 0, hauteur: int = 32, miroir: bool = False, bulle: str | None = None,
+           **options) -> ctk.CTkButton:
     """Bouton aux couleurs du thème.
 
     principal : l'action principale de l'écran (une seule) ; secondaire : les
@@ -99,12 +100,55 @@ def bouton(parent, texte: str = "", commande=None, style: str = "secondaire", ic
     """
     fond, survol, couleur, bordure = _STYLES[style]
     image = icone(icone_nom, 16, couleur, miroir) if icone_nom else None
-    return ctk.CTkButton(
+    widget = ctk.CTkButton(
         parent, text=texte, command=commande, image=image, compound="left",
         width=largeur or (hauteur if not texte else 0), height=hauteur, corner_radius=6,
         fg_color=fond, hover_color=survol, text_color=couleur, text_color_disabled=TEXTE_DISCRET,
         border_width=1 if bordure else 0, border_color=bordure or SURFACE,
         font=police(13, gras=style == "principal"), **options)
+    if bulle:
+        infobulle(widget, bulle)
+    return widget
+
+
+def infobulle(widget, texte: str):
+    """Petite bulle d'explication au survol (indispensable pour un bouton à icône seule)."""
+    etat = {"bulle": None, "attente": None}
+
+    def montrer():
+        etat["attente"] = None
+        if etat["bulle"] is not None or not widget.winfo_exists():
+            return
+        bulle = ctk.CTkToplevel(widget)
+        bulle.overrideredirect(True)
+        bulle.attributes("-topmost", True)
+        ctk.CTkLabel(bulle, text=texte, font=police(12), text_color=TEXTE, fg_color=SURFACE_3,
+                     corner_radius=4, padx=8, pady=3).pack()
+        bulle.geometry(f"+{widget.winfo_rootx()}+{widget.winfo_rooty() + widget.winfo_height() + 4}")
+        etat["bulle"] = bulle
+
+    def cacher(_e=None):
+        if etat["attente"] is not None:
+            widget.after_cancel(etat["attente"])
+            etat["attente"] = None
+        if etat["bulle"] is not None:
+            etat["bulle"].destroy()
+            etat["bulle"] = None
+
+    def entrer(_e=None):
+        if etat["attente"] is None:
+            etat["attente"] = widget.after(500, montrer)
+
+    widget.bind("<Enter>", entrer, add="+")
+    widget.bind("<Leave>", cacher, add="+")
+    widget.bind("<ButtonPress>", cacher, add="+")
+
+
+def activer(bouton: ctk.CTkButton, actif: bool, style: str = "secondaire"):
+    """Active ou désactive un bouton ; désactivé, il perd sa couleur pour ne pas sembler cliquable."""
+    fond, survol, couleur, _bordure = _STYLES[style]
+    bouton.configure(state="normal" if actif else "disabled",
+                     fg_color=fond if actif else ("transparent" if fond == "transparent" else SURFACE_2))
 
 
 def champ(parent, **options) -> ctk.CTkEntry:

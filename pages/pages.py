@@ -16,10 +16,11 @@ import pymupdf as fitz
 from PIL import Image
 
 import pdf_core as core
+import theme
 from pages.copie import PageCopie
 
 LARGEUR_VIGNETTE = 140  # pixels
-COULEUR_CHOISIE = ("#3B8ED0", "#1F6AA5")
+COULEUR_CHOISIE = theme.ACCENT_DOUX
 
 
 def _plages(indices: list[int]) -> str:
@@ -48,22 +49,22 @@ class PageGestionPages(PageCopie):
         self._images: list[ctk.CTkImage] = []
         self._a_redessiner = True
         self.section("Pages sélectionnées")
-        self.aide("Clic : choisir une page. Ctrl+clic : en ajouter. Maj+clic : une suite de pages.")
-        ligne = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        ligne.pack(fill="x", padx=12, pady=2)
-        for texte, commande in (("↺", lambda: self.tourner(-90)), ("↻", lambda: self.tourner(90)),
-                                ("▲", lambda: self.deplacer(-1)), ("▼", lambda: self.deplacer(1))):
-            ctk.CTkButton(ligne, text=texte, width=44, command=commande).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(ligne, text="Supprimer", width=90, fg_color="#C92A2A", hover_color="#A61E1E",
-                      command=self.supprimer).pack(side="left")
-        ligne = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        ligne.pack(fill="x", padx=12, pady=(6, 2))
-        ctk.CTkButton(ligne, text="Insérer un PDF…", command=self.inserer).pack(
+        self.aide("Clic : une page. Ctrl+clic : en ajouter. Maj+clic : une suite de pages.")
+        ligne = self.ligne()
+        for icone_nom, miroir, commande, bulle in (
+                ("pivoter", True, lambda: self.tourner(-90), "Pivoter à gauche"),
+                ("pivoter", False, lambda: self.tourner(90), "Pivoter à droite"),
+                ("monter", False, lambda: self.deplacer(-1), "Avancer"),
+                ("descendre", False, lambda: self.deplacer(1), "Reculer")):
+            theme.bouton(ligne, icone_nom=icone_nom, miroir=miroir, commande=commande, bulle=bulle).pack(side="left", padx=(0, 6))
+        theme.bouton(ligne, "Supprimer", self.supprimer, style="danger", icone_nom="supprimer").pack(side="right")
+        ligne = self.ligne()
+        theme.bouton(ligne, "Insérer un PDF…", self.inserer, icone_nom="inserer").pack(
             side="left", fill="x", expand=True, padx=(0, 6))
-        ctk.CTkButton(ligne, text="Extraire…", command=self.extraire).pack(side="left", fill="x", expand=True)
+        theme.bouton(ligne, "Extraire…", self.extraire, icone_nom="extraire").pack(side="left", fill="x", expand=True)
         self.section("Toutes les pages")
         self.grille = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        self.grille.pack(fill="x", padx=8, pady=(0, 12))
+        self.grille.pack(fill="x", padx=10, pady=(0, 12))
 
     # ------------------------------------------------------- vignettes
 
@@ -99,11 +100,11 @@ class PageGestionPages(PageCopie):
             pix = page.get_pixmap(matrix=fitz.Matrix(echelle, echelle), alpha=False)
             image = ctk.CTkImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples),
                                  size=(pix.width, pix.height))
-            cellule = ctk.CTkFrame(self.grille, corner_radius=8, border_width=0)
+            cellule = ctk.CTkFrame(self.grille, corner_radius=8, border_width=0, fg_color="transparent")
             cellule.grid(row=i // 2, column=i % 2, padx=4, pady=4, sticky="n")
             vignette = ctk.CTkLabel(cellule, image=image, text="")
             vignette.pack(padx=6, pady=(6, 0))
-            numero = ctk.CTkLabel(cellule, text=str(i + 1))
+            numero = ctk.CTkLabel(cellule, text=str(i + 1), font=theme.police(12), text_color=theme.TEXTE_2)
             numero.pack(pady=(0, 4))
             for widget in (vignette, numero):
                 # état du clic : 0x4 = Ctrl, 0x1 = Maj
@@ -213,5 +214,4 @@ class PageGestionPages(PageCopie):
                 doc.close()
 
         self.app.statut("Extraction…")
-        self.app.lancer(travail, fin=lambda n: (self.app.statut(f"{n} page(s) extraite(s)."),
-                                                  self.app.proposer_ouverture(sortie)))
+        self.app.lancer(travail, fin=lambda n: self.app.proposer_ouverture(sortie, f"{n} page(s) extraite(s)."))

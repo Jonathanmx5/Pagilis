@@ -115,10 +115,65 @@ class PageFonction:
         entree.delete(0, "end")
         entree.insert(0, valeur if isinstance(valeur, str) else f"{valeur:.1f}".rstrip("0").rstrip("."))
 
-    def case_continuer(self) -> ctk.BooleanVar:
-        var = ctk.BooleanVar(value=False)
-        self.case(self.cadre, "Continuer sur le fichier résultat", var)
-        return var
+    @staticmethod
+    def radio(parent, texte: str, variable, valeur) -> ctk.CTkRadioButton:
+        bouton = ctk.CTkRadioButton(parent, text=texte, variable=variable, value=valeur, font=theme.police(13),
+                                    text_color=theme.TEXTE, fg_color=theme.ACCENT, hover_color=theme.ACCENT_SURVOL,
+                                    border_color=theme.BORDURE, radiobutton_width=18, radiobutton_height=18)
+        bouton.pack(anchor="w", padx=16, pady=4)
+        return bouton
+
+    def segments(self, libelle: str, valeurs: list[str], variable, commande=None) -> ctk.CTkSegmentedButton:
+        ligne = self.ligne()
+        ctk.CTkLabel(ligne, text=libelle, width=96, anchor="w", font=theme.police(13),
+                     text_color=theme.TEXTE_2).pack(side="left")
+        choix = ctk.CTkSegmentedButton(ligne, values=valeurs, variable=variable, command=commande,
+                                       font=theme.police(12), fg_color=theme.SURFACE_2,
+                                       selected_color=theme.ACCENT, selected_hover_color=theme.ACCENT_SURVOL,
+                                       unselected_color=theme.SURFACE_2, unselected_hover_color=theme.SURFACE_3,
+                                       text_color=theme.TEXTE)
+        choix.pack(side="left", fill="x", expand=True)
+        return choix
+
+    def curseur(self, libelle: str, debut: float, fin: float, variable, suffixe: str = "",
+                commande=None) -> ctk.CTkSlider:
+        """Réglage à la souris, avec sa valeur affichée à droite."""
+        ligne = self.ligne()
+        ctk.CTkLabel(ligne, text=libelle, width=96, anchor="w", font=theme.police(13),
+                     text_color=theme.TEXTE_2).pack(side="left")
+        valeur = ctk.CTkLabel(ligne, width=48, anchor="e", font=theme.police(12), text_color=theme.TEXTE_2)
+        valeur.pack(side="right")
+
+        def changer(_v=None):
+            valeur.configure(text=f"{round(variable.get())}{suffixe}")
+            if commande:
+                commande()
+
+        glissiere = ctk.CTkSlider(ligne, from_=debut, to=fin, variable=variable, command=changer,
+                                  progress_color=theme.ACCENT, button_color=theme.TEXTE,
+                                  button_hover_color="#ffffff", fg_color=theme.SURFACE_3, height=16)
+        glissiere.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        changer()
+        return glissiere
+
+    def options_avancees(self) -> ctk.CTkFrame:
+        """Réglages techniques, repliés tant qu'on ne les demande pas."""
+        cadre = ctk.CTkFrame(self.cadre, fg_color="transparent")
+        bascule = theme.bouton(self.cadre, "Options avancées", style="discret", hauteur=28, anchor="w",
+                               icone_nom="descendre")
+        bascule.pack(fill="x", padx=10, pady=(12, 0))
+
+        def basculer():
+            if cadre.winfo_ismapped():
+                cadre.pack_forget()
+                bascule.configure(image=theme.icone("descendre", 16))
+            else:
+                cadre.pack(fill="x", after=bascule)
+                bascule.configure(image=theme.icone("monter", 16))
+
+        bascule.configure(command=basculer)
+        self.basculer_options = basculer
+        return cadre
 
     @staticmethod
     def case(parent, texte: str, variable, commande=None) -> ctk.CTkCheckBox:

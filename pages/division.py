@@ -19,19 +19,18 @@ class PageDivision(PageFonction):
     description = "Découper un PDF en plusieurs fichiers."
 
     def construire(self):
-        self.section("Mode de découpe")
+        self.section("Découper")
         self.mode_division = ctk.StringVar(value="page")
         for valeur, texte in [("page", "Une page par fichier"),
                               ("n", "Toutes les N pages"),
-                              ("plages", "Par plages (une plage = un fichier)")]:
-            ctk.CTkRadioButton(self.cadre, text=texte, variable=self.mode_division,
-                               value=valeur).pack(anchor="w", padx=12, pady=4)
-        self.section("Paramètres")
+                              ("plages", "Selon des plages de pages")]:
+            self.radio(self.cadre, texte, self.mode_division, valeur)
+        self.section("Réglages")
         self.entree_n = self.champ("N pages", "2")
         self.entree_plages = self.champ("Plages", "")
-        self.entree_plages.configure(placeholder_text="ex. 1-3, 5, 8-")
-        self.aide("Les fichiers sont créés dans le dossier que vous choisirez.")
-        self.bouton_action("Diviser…", self.lancer_division)
+        self.entree_plages.configure(placeholder_text="1-3, 5, 8-")
+        self.aide("Chaque plage donne un fichier. Les fichiers sont créés dans le dossier que vous choisirez.")
+        self.bouton_action("Découper", self.lancer_division, icone_nom="decouper")
 
     def lancer_division(self):
         if not self.app.exiger_pdf():

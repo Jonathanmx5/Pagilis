@@ -345,9 +345,10 @@ def test_ocr_from_interface_frames_words(ui, tmp_path):
         app.charger_fichier(str(scan))
         app.afficher_page("OCR (scans)")
         d.enregistrer_sous = str(sortie)
-        app.fonctions["OCR (scans)"].continuer_ocr.set(True)
         app.fonctions["OCR (scans)"].lancer_ocr()
         yield TRAVAUX
+        assert set(app.actions_notification) == {"Ouvrir", "Continuer dessus"}
+        app.action_notification("Continuer dessus")
         yield 300
         assert fitz.open(sortie)[0].search_for("Bonjour")
         assert app.chemin_pdf == str(sortie), "continuer sur le fichier résultat"
@@ -1023,5 +1024,41 @@ def test_switching_between_modifier_and_pages_keeps_edits(ui, contrat):
         assert app.page_active == "Modifier"
         app.afficher_page("Fusion")
         assert app.page_active == "Modifier"  # vers une autre fonction : la question est posée
+
+    executer(app, scenario)
+
+
+# ------------------------------------------------------ accueil et récents
+
+
+def test_welcome_screen_until_a_document_is_open(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    absent = tmp_path / "parti.pdf"
+
+    def scenario():
+        yield 100
+        assert app.accueil.winfo_ismapped()
+        app.config_data["recents"] = [str(absent), str(contrat)]
+        app.afficher_accueil()
+        yield 50
+        assert app.boutons_recents == [str(contrat)]  # un fichier disparu n'est pas proposé
+        app.ouvrir_document(app.boutons_recents[0])
+        yield 100
+        assert not app.accueil.winfo_ismapped() and app.chemin_pdf == str(contrat)
+
+    executer(app, scenario)
+
+
+def test_opened_files_become_recent(ui, contrat, cinq_pages):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.ouvrir_document(str(cinq_pages))
+        app.ouvrir_document(str(contrat))
+        app.ouvrir_document(str(cinq_pages))
+        yield 50
+        assert app.config_data["recents"][:2] == [str(cinq_pages), str(contrat)]
 
     executer(app, scenario)
