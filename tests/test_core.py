@@ -479,3 +479,17 @@ def test_rewrite_line_unchanged_text_is_noop(tmp_path):
 def test_rewrite_line_no_line_returns_false(tmp_path):
     doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))
     assert not core.rewrite_line(doc, 0, fitz.Point(5, 5), "rien")
+
+
+@pytest.mark.parametrize("police, drapeaux, serif", [
+    ("Aptos", 4, False),            # Word marque Aptos « serif » à tort
+    ("ABCDEF+Calibri", 4, False),
+    ("ArialMT", 4, False),
+    ("Cambria", 0, True),
+    ("TimesNewRomanPSMT", 0, True),
+    ("Georgia-Bold", 0, True),
+    ("PoliceInconnue", 4, True),    # nom inconnu : on suit le drapeau
+    ("PoliceInconnue", 0, False),
+])
+def test_serif_style_trusts_font_name_before_flag(police, drapeaux, serif):
+    assert core._style_flags({"font": police, "flags": drapeaux})[2] is serif

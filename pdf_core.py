@@ -332,13 +332,26 @@ class TextSpan:
     mono: bool
 
 
+# Familles reconnues par leur nom. Le drapeau « serif » des PDF n'est pas fiable :
+# Word le pose par exemple sur Aptos et Calibri, qui n'ont pas d'empattement.
+POLICES_SANS = ("sans", "arial", "helvetica", "calibri", "aptos", "segoe", "verdana", "tahoma",
+                "trebuchet", "roboto", "gothic", "candara", "corbel", "lato", "inter", "frutiger")
+POLICES_SERIF = ("times", "roman", "georgia", "cambria", "garamond", "palatino", "antiqua",
+                 "baskerville", "constantia", "minion", "bookman", "century", "serif")
+
+
 def _style_flags(span: dict) -> tuple[bool, bool, bool, bool]:
     flags = span.get("flags", 0)
     nom = span.get("font", "").lower()
     gras = bool(flags & 16) or "bold" in nom or "black" in nom
     italique = bool(flags & 2) or "italic" in nom or "oblique" in nom
     mono = bool(flags & 8) or "courier" in nom or "mono" in nom
-    serif = bool(flags & 4) or "times" in nom or "serif" in nom and "sans" not in nom
+    if any(m in nom for m in POLICES_SANS):
+        serif = False
+    elif any(m in nom for m in POLICES_SERIF):
+        serif = True
+    else:
+        serif = bool(flags & 4)
     return gras, italique, serif, mono
 
 

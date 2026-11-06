@@ -40,6 +40,8 @@ class Dialogues:
         self.enregistrer_sous = None
         self.dossier = None
         self.oui_non = False
+        self.oui_non_annuler = None  # réponse à « Enregistrer les modifications ? »
+        self.demandes_enregistrer = []  # options passées au dialogue « Enregistrer sous »
 
 
 @pytest.fixture
@@ -60,7 +62,12 @@ def ui(monkeypatch, tmp_path):
             return d.mot_de_passe.pop(0)
         return d.mot_de_passe
     monkeypatch.setattr(s.simpledialog, "askstring", mot_de_passe)
-    monkeypatch.setattr(s.filedialog, "asksaveasfilename", lambda **k: d.enregistrer_sous)
+    monkeypatch.setattr(s.messagebox, "askyesnocancel", lambda *a, **k: d.oui_non_annuler)
+
+    def enregistrer_sous(**k):
+        d.demandes_enregistrer.append(k)
+        return d.enregistrer_sous
+    monkeypatch.setattr(s.filedialog, "asksaveasfilename", enregistrer_sous)
     monkeypatch.setattr(s.filedialog, "askdirectory", lambda **k: d.dossier)
     applis = []
 
@@ -644,5 +651,183 @@ def test_click_on_scan_suggests_ocr(ui, tmp_path):
         cliquer(app, fitz.Point(200, 200))
         assert app.saisie is None
         assert app.etat.cget("text") == "Aucun texte ici. Page scannée ? Utilisez l'OCR d'abord."
+
+    executer(app, scenario)
+
+
+def corriger_montant(app, texte="Montant total : 950 euros."):
+    cliquer(app, centre_mot(app.apercu.page, "Montant"))
+    app.saisie.delete(0, "end")
+    app.saisie.insert(0, texte)
+    app._valider_saisie()
+
+
+def texte_de(chemin, page=1):
+    return " ".join(fitz.open(chemin)[page].get_text().split())
+
+
+def test_ctrl_z_undoes_and_disables_button(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        assert app.bouton_annuler.cget("state") == "normal"
+        app.annuler_retouche()
+        yield 100
+        assert "1 200 euros" in " ".join(app.apercu.page.get_text().split())
+        assert app.bouton_annuler.cget("state") == "disabled"
+
+    executer(app, scenario)
+
+
+def test_ctrl_s_saves_proposed_name(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "out.pdf"
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.enregistrer_sous = str(sortie)
+        app.enregistrer_edition()
+        yield TRAVAUX
+        assert "950 euros" in texte_de(sortie)
+        assert not app.edition.modifie and "•" not in app.title()
+        options = d.demandes_enregistrer[-1]
+        assert options["initialfile"] == "contrat_modifie.pdf"
+        assert os.path.normcase(options["initialdir"]) == os.path.normcase(str(contrat.parent))
+
+    executer(app, scenario)
+
+
+def test_word_save_proposes_pdf_next_to_document(ui, contrat, tmp_path, monkeypatch):
+    import shutil
+    s, creer, d = ui
+    app = creer()
+    source = tmp_path / "lettre.docx"
+    source.write_bytes(b"faux word")
+
+    def convertir(chemin, dossier, delai=120):
+        sortie = os.path.join(dossier, "lettre.pdf")
+        shutil.copy(contrat, sortie)
+        return sortie
+
+    monkeypatch.setattr(s.conversion, "word_vers_pdf", convertir)
+
+    def scenario():
+        app.afficher_page("Modifier")
+        app.ouvrir_document(str(source))
+        yield TRAVAUX
+        app.apercu.aller(1)
+        yield 300
+        corriger_montant(app)
+        d.enregistrer_sous = None  # l'utilisateur annule
+        app.enregistrer_edition()
+        options = d.demandes_enregistrer[-1]
+        assert options["initialfile"] == "lettre.pdf"
+        assert os.path.normcase(options["initialdir"]) == os.path.normcase(str(tmp_path))
+        assert app.edition.modifie
+
+    executer(app, scenario)
+
+
+def test_title_marks_unsaved_changes(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        assert "•" not in app.title()
+        corriger_montant(app)
+        assert "•" in app.title()
+
+    executer(app, scenario)
+
+
+def test_close_with_changes_cancel_keeps_window(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = None
+        app._fermer()
+        yield 50
+        assert app.winfo_exists() and app.edition.modifie
+
+    executer(app, scenario)
+
+
+def test_close_with_changes_no_discards(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    fermee = []
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = False
+        app.after(10, lambda: (fermee.append(True), app.quit()))  # quitte la boucle si destroy réussit
+        app._fermer()
+
+    try:
+        executer(app, scenario)
+    except Exception:  # noqa: BLE001 - la fenêtre détruite interrompt le scénario
+        pass
+    assert "1 200 euros" in texte_de(contrat)  # rien d'écrit
+    assert d.demandes_enregistrer == []
+
+
+def test_close_with_changes_yes_saves_first(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "avant_fermeture.pdf"
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = True
+        d.enregistrer_sous = str(sortie)
+        app._fermer()
+
+    try:
+        executer(app, scenario)
+    except Exception:  # noqa: BLE001 - la fenêtre détruite interrompt le scénario
+        pass
+    assert "950 euros" in texte_de(sortie)
+
+
+def test_leave_page_or_open_other_file_asks(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    autre = tmp_path / "autre.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "Autre document")
+    doc.save(autre)
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = None
+        app.afficher_page("Fusion")
+        assert app.page_active == "Modifier"
+        app.ouvrir_document(str(autre))
+        yield 100
+        assert app.edition.source == str(contrat) and app.edition.modifie
+        d.oui_non_annuler = False  # « Non » : on quitte sans enregistrer, retouches abandonnées
+        app.afficher_page("Fusion")
+        assert app.page_active == "Fusion"
+        assert not app.edition.modifie
+        assert "1 200 euros" in " ".join(app.edition.doc[1].get_text().split())
 
     executer(app, scenario)

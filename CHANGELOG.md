@@ -11,6 +11,16 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.3.0]
+
+- Nouvelle fonction « Modifier » : cliquez sur une ligne pour corriger son
+  texte sur place, faites glisser un bloc pour le déplacer. Les retouches
+  s'annulent (Ctrl+Z) et s'enregistrent en une fois (Ctrl+S).
+- Les documents Word (.docx, .doc, .rtf, .odt) s'ouvrent : ils sont convertis
+  en PDF avec Microsoft Word, ou LibreOffice s'il n'y a pas Word.
+- Pagilis prévient avant de fermer ou d'ouvrir un autre fichier si des
+  retouches ne sont pas enregistrées.
+
 ## [1.2.0]
 
 - PDF Studio s'appelle désormais Pagilis.

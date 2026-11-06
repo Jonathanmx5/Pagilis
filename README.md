@@ -23,6 +23,15 @@ s'appelait PDF Studio. Une installation de PDF Studio qui reçoit la mise à jou
 devient automatiquement Pagilis (nouveau dossier, raccourcis et entrée Windows ;
 l'ancienne installation est retirée), et les préférences sont reprises.
 
+## Modifier un PDF ou un Word
+
+Fonction **Modifier** : ouvrir un PDF ou un document Word, puis dans l'aperçu
+cliquer sur une ligne pour la corriger (Entrée pour valider, Échap pour
+abandonner) ou faire glisser un bloc pour le déplacer. Ctrl+Z annule les 20
+dernières retouches, Ctrl+S enregistre en PDF (pour un Word : `<nom>.pdf` à
+côté du document). Un Word est converti avec Microsoft Word, ou LibreOffice
+s'il n'y a pas Word ; sans l'un des deux, il ne peut pas être ouvert.
+
 ## Limites connues
 
 - Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée (les
@@ -32,6 +41,10 @@ l'ancienne installation est retirée), et les préférences sont reprises.
 - Pas de détection des pages à l'envers ou couchées à 90°.
 - Le redressement des pages penchées et le remplacement de texte sur un scan ne
   sont pas encore disponibles.
+- Modifier : une ligne corrigée est réécrite d'un seul style (celui de son
+  morceau le plus long) ; une page scannée doit d'abord passer à l'OCR ; un PDF
+  protégé est enregistré sans mot de passe ; un Word protégé par mot de passe
+  ne s'ouvre pas ; le résultat d'un Word est un PDF, pas un Word.
 - Un .exe non signé peut être signalé par Windows Defender.
 - Journal d'erreurs : `%LOCALAPPDATA%\Pagilis\pagilis.log`.
 

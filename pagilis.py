@@ -160,6 +160,11 @@ class Pagilis(ctk.CTk):
         derniere = self.config_data.get("derniere_page")
         self.afficher_page(derniere if derniere in self.pages else FONCTIONS[0][0])
         self.protocol("WM_DELETE_WINDOW", self._fermer)
+        # Raccourcis de la page « Modifier » (minuscule et majuscule : verrouillage).
+        for touche in ("<Control-z>", "<Control-Z>"):
+            self.bind(touche, lambda _e: self._raccourci(self.annuler_retouche))
+        for touche in ("<Control-s>", "<Control-S>"):
+            self.bind(touche, lambda _e: self._raccourci(self.enregistrer_edition))
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
         # Seules les versions publiées pour tous sont proposées, jamais les bêtas
@@ -278,6 +283,11 @@ class Pagilis(ctk.CTk):
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
+        if self.page_active == "Modifier" and nom != "Modifier" and self.edition is not None:
+            # Les autres fonctions lisent le fichier enregistré, pas la copie de travail.
+            self._fermer_saisie()
+            if not self._confirmer_abandon(abandonner=True):
+                return
         for autre, page in self.pages.items():
             if autre != nom:
                 page.grid_forget()
@@ -402,6 +412,8 @@ class Pagilis(ctk.CTk):
     # ------------------------------------------------------ utilitaires
 
     def _fermer(self):
+        if not self._confirmer_abandon():
+            return
         self.config_data["dernier_dossier"] = self.dernier_dossier
         sauver_config(self.config_data)
         shutil.rmtree(self.dossier_conversions, ignore_errors=True)
@@ -421,6 +433,8 @@ class Pagilis(ctk.CTk):
 
     def ouvrir_document(self, chemin: str):
         """Ouvre un PDF, ou convertit d'abord un Word en PDF (en arrière-plan)."""
+        if not self._confirmer_abandon():
+            return
         if not conversion.est_word(chemin):
             self.charger_fichier(chemin)
             return
@@ -466,6 +480,8 @@ class Pagilis(ctk.CTk):
         self.apercu.charger(doc)
         # Nouvelle copie de travail (page « Modifier ») sur le document affiché.
         self.edition = Edition(doc, chemin)
+        if hasattr(self, "bouton_annuler"):
+            self._maj_etat_edition()
         self.statut(f"Fichier ouvert : {os.path.basename(chemin)} ({doc.page_count} page(s))")
         return True
 
@@ -1309,10 +1325,82 @@ class Pagilis(ctk.CTk):
         return resultat
 
     def _maj_etat_edition(self):
-        """Boutons Annuler / Enregistrer selon l'état de la copie de travail."""
+        """Boutons Annuler / Enregistrer et titre de la fenêtre (« • » = non enregistré)."""
         ed = self.edition
         self.bouton_annuler.configure(state="normal" if ed and ed.peut_annuler else "disabled")
         self.bouton_enregistrer.configure(state="normal" if ed and ed.modifie else "disabled")
+        if ed and ed.modifie:
+            self.title(f"Pagilis • {os.path.basename(ed.source)}")
+        else:
+            self.title("Pagilis")
+
+    def _raccourci(self, action):
+        """Ctrl+Z / Ctrl+S : seulement sur « Modifier », hors zone de saisie."""
+        if self.page_active == "Modifier" and self.saisie is None and not self.travaux_en_cours:
+            action()
+
+    def annuler_retouche(self):
+        if self.edition is None or not self.edition.peut_annuler or self.travaux_en_cours:
+            return
+        self._fermer_saisie()
+        self._retoucher(self.edition.annuler)
+        self.statut("Dernière retouche annulée.")
+
+    def _demander_chemin_edition(self) -> str | None:
+        propose = self.edition.nom_propose()
+        return filedialog.asksaveasfilename(
+            initialdir=os.path.dirname(propose), initialfile=os.path.basename(propose),
+            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")]) or None
+
+    def enregistrer_edition(self):
+        """Enregistre la copie de travail (en arrière-plan)."""
+        if self.edition is None or self.travaux_en_cours:
+            return
+        self._fermer_saisie()
+        chemin = self._demander_chemin_edition()
+        if not chemin:
+            return
+        edition = self.edition
+
+        def fin(_resultat):
+            self._memoriser_dossier(chemin)
+            self._maj_etat_edition()
+            self.statut(f"Enregistré : {os.path.basename(chemin)}")
+
+        self.lancer(lambda _p: edition.enregistrer(chemin), fin=fin)
+
+    def _confirmer_abandon(self, abandonner: bool = False) -> bool:
+        """Retouches non enregistrées : propose de les enregistrer. Vrai = on peut continuer.
+
+        abandonner : sur « Non », la copie de travail revient au fichier ouvert.
+        """
+        ed = self.edition
+        if ed is None or not ed.modifie:
+            return True
+        reponse = messagebox.askyesnocancel("Pagilis", "Enregistrer les modifications ?")
+        if reponse is None:
+            return False
+        if reponse:
+            chemin = self._demander_chemin_edition()
+            if not chemin:
+                return False
+            try:
+                ed.enregistrer(chemin)
+            except Exception:  # noqa: BLE001 - on reste sur place, rien n'est perdu
+                logging.exception("Enregistrement impossible : %s", chemin)
+                messagebox.showerror("Pagilis", f"Impossible d'enregistrer « {os.path.basename(chemin)} ».")
+                return False
+            self._memoriser_dossier(chemin)
+        elif abandonner:
+            # Retouches abandonnées : on repart du document tel qu'il a été ouvert.
+            source, word = ed.source, ed.origine_word
+            if self.charger_fichier(self.chemin_pdf):
+                self.edition = Edition(self.apercu.doc, source, origine_word=word)
+                self.label_fichier.configure(text=os.path.basename(source))
+        else:
+            ed.modifie = False
+        self._maj_etat_edition()
+        return True
 
 
 def desinstaller_avec_confirmation() -> None:
