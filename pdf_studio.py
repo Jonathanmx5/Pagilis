@@ -164,7 +164,8 @@ class PDFStudio(ctk.CTk):
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
         version_ignoree = self.config_data.get("version_ignoree")
-        threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree,), daemon=True).start()
+        beta = bool(self.config_data.get("canal_beta", False))
+        threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree, beta), daemon=True).start()
 
     # ------------------------------------------------- barre latérale
 
@@ -211,9 +212,14 @@ class PDFStudio(ctk.CTk):
         )
         menu.set(next(k for k, v in themes.items() if v == actuel))
         menu.grid(row=bas + 1, column=0, sticky="ew", padx=20, pady=(4, 8))
+        # Canal bêta : versions de test, avant leur publication à tous.
+        self.canal_beta = ctk.BooleanVar(value=bool(self.config_data.get("canal_beta", False)))
+        ctk.CTkSwitch(barre, text="Versions bêta", variable=self.canal_beta,
+                      command=lambda: self.config_data.update(canal_beta=self.canal_beta.get())).grid(
+            row=bas + 2, column=0, sticky="w", padx=20, pady=(4, 4))
         ctk.CTkButton(barre, text="Aide et limites", fg_color="transparent", border_width=1,
                       text_color=("gray10", "gray90"), command=self.afficher_aide).grid(
-            row=bas + 2, column=0, sticky="ew", padx=20, pady=(4, 20))
+            row=bas + 3, column=0, sticky="ew", padx=20, pady=(4, 20))
         ctk.set_appearance_mode(actuel)
 
     # ------------------------------------------------- installation sur le PC
@@ -298,8 +304,8 @@ class PDFStudio(ctk.CTk):
 
     # ------------------------------------------------------ mises à jour
 
-    def _chercher_mise_a_jour(self, version_ignoree: str | None):
-        mise_a_jour = updater.check_for_update()
+    def _chercher_mise_a_jour(self, version_ignoree: str | None, beta: bool = False):
+        mise_a_jour = updater.check_for_update(beta=beta)
         # « Ne plus me proposer cette version » : on se tait pour CETTE version seulement.
         if mise_a_jour and mise_a_jour.version != version_ignoree:
             self.after(0, lambda: self._popup_mise_a_jour(mise_a_jour))
@@ -308,7 +314,7 @@ class PDFStudio(ctk.CTk):
         """Popup facultatif : « Plus tard » ou la croix ferment le popup sans rien installer."""
         popup = ctk.CTkToplevel(self)
         popup.title("Mise à jour disponible")
-        popup.geometry("420x260")
+        popup.geometry("460x440" if mise_a_jour.notes else "420x260")
         popup.resizable(False, False)
         popup.transient(self)
         ne_plus_proposer = ctk.BooleanVar(value=False)
@@ -326,6 +332,12 @@ class PDFStudio(ctk.CTk):
                  f"Voulez-vous l'installer maintenant ?",
             wraplength=380,
         ).pack(padx=20, pady=(24, 12))
+        if mise_a_jour.notes:
+            # Les nouveautés : sans elles, l'utilisateur ne sait pas ce qu'il installe.
+            notes = ctk.CTkTextbox(popup, height=170, wrap="word")
+            notes.insert("1.0", mise_a_jour.notes)
+            notes.configure(state="disabled")
+            notes.pack(fill="x", padx=20, pady=(0, 10))
         barre = ctk.CTkProgressBar(popup)
         barre.set(0)
         barre.pack(fill="x", padx=20)
@@ -350,6 +362,12 @@ class PDFStudio(ctk.CTk):
             def travail():
                 try:
                     updater.download(mise_a_jour, destination, progression)
+                    # La nouvelle version doit prouver qu'elle fonctionne AVANT de remplacer celle-ci.
+                    popup.after(0, lambda: etat.configure(text="Vérification de la nouvelle version…"))
+                    if not updater.verifier_exe(destination):
+                        os.remove(destination)
+                        raise RuntimeError("la nouvelle version n'a pas passé son auto-vérification ; "
+                                           "votre version actuelle est conservée")
                     popup.after(0, lambda: etat.configure(text="Installation…"))
                     updater.install_and_restart(destination)
                     popup.after(0, self._quitter_sans_sauver)
@@ -1168,6 +1186,12 @@ def desinstaller_avec_confirmation() -> None:
 
 def main() -> None:
     arguments = sys.argv[1:]
+    if "--verifier" in arguments:
+        # Auto-vérification sans fenêtre (CI, et nouvelle version avant installation).
+        import verification
+        echecs = verification.verifier()
+        logging.info("Auto-vérification %s : %s", updater.APP_VERSION, "OK" if not echecs else echecs)
+        sys.exit(1 if echecs else 0)
     if "--desinstaller" in arguments:
         return desinstaller_avec_confirmation()
     ctk.set_appearance_mode("system")

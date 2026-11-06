@@ -1,11 +1,13 @@
 # Publie une version : il suffit de pousser un tag, par exemple
-#     git tag v1.0.2
-#     git push origin v1.0.2
+#     git tag v1.2.0            (version pour tous)
+#     git tag v1.2.0-beta.1     (bêta : seulement pour qui a activé « Versions bêta »)
+#     git push origin <tag>
 # Le numéro de version vient du TAG : il est injecté dans updater.py avant la
 # compilation, donc le code, l'exe et version.json ne peuvent plus diverger.
+# CHANGELOG.md doit avoir une section pour cette version, sinon rien n'est publié.
 #
-# Lancé à la main (onglet Actions > Release > Run workflow), il compile et
-# fournit l'exe en téléchargement SANS rien publier : utile pour tester.
+# Lancé à la main (onglet Actions > Release > Run workflow), il fait tout SAUF
+# publier, et fournit l'exe en téléchargement : utile pour tester.
 name: Release
 
 on:
@@ -19,6 +21,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"  # accents des notes de version sans erreur d'encodage
     steps:
       - uses: actions/checkout@v7
 
@@ -35,7 +39,8 @@ jobs:
           if ("${{ github.ref_type }}" -eq "tag") {
             $version = "${{ github.ref_name }}".TrimStart("v")
           } else {
-            $version = "0.0.0-essai"  # compilation d'essai : jamais publiée
+            # Compilation d'essai, jamais publiée : version du code suffixée.
+            $version = (python -c "import updater; print(updater.APP_VERSION)") + "-essai"
           }
           # Remplace APP_VERSION dans updater.py, et vérifie que c'est bien fait.
           (Get-Content updater.py -Raw) -replace 'APP_VERSION = ".*"', "APP_VERSION = `"$version`"" |
@@ -43,28 +48,24 @@ jobs:
           python -c "import updater, sys; v = updater.APP_VERSION; print('APP_VERSION =', v); sys.exit(v != '$version')"
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      # Vérifié AVANT la compilation : inutile de compiler 3 minutes pour rien.
+      - name: Notes de version (CHANGELOG.md)
+        run: python -c "import publication, pathlib; print(publication.notes_de_version(pathlib.Path('CHANGELOG.md').read_text(encoding='utf-8'), '${{ steps.version.outputs.version }}'))"
+
       - name: Cache des fichiers de langue Tesseract
         uses: actions/cache@v6
         with:
           path: tessdata
           key: tessdata-fast-fra-eng-v1
 
-      # Même script que sur le poste du développeur : dépendances, analyse, tests, exe.
+      # Même script que sur le poste du développeur : dépendances, analyse, tests,
+      # exe, puis auto-vérification de l'exe compilé (--verifier).
       - name: Compilation
         shell: cmd
         run: build_exe.bat
 
-      - name: Empreinte et fichier de version
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $sha = (Get-FileHash dist/PDFStudio.exe -Algorithm SHA256).Hash.ToLower()
-          [ordered]@{
-            version = $version
-            url     = "https://github.com/${{ github.repository }}/releases/download/v$version/PDFStudio.exe"
-            sha256  = $sha
-          } | ConvertTo-Json | Set-Content dist/version.json -Encoding utf8
-          Get-Content dist/version.json
+      - name: Empreinte, notes et fichier de version
+        run: python publication.py "${{ steps.version.outputs.version }}" "${{ github.repository }}" dist/PDFStudio.exe dist
 
       - name: Exe en téléchargement (compilation d'essai)
         if: github.ref_type != 'tag'
@@ -77,8 +78,12 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${{ github.ref_name }}" dist/PDFStudio.exe dist/version.json
-          --title "PDF Studio ${{ steps.version.outputs.version }}"
-          --notes "PDF Studio version ${{ steps.version.outputs.version }}."
-          --verify-tag
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          # Une bêta est une « pre-release » : GitHub ne la présente jamais comme la
+          # dernière version, donc le canal normal ne la voit pas.
+          $options = @()
+          if ($version.Contains("-")) { $options += "--prerelease" }
+          gh release create "${{ github.ref_name }}" dist/PDFStudio.exe dist/version.json `
+            --title "PDF Studio $version" --notes-file dist/notes.md --verify-tag @options

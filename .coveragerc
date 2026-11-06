@@ -1,0 +1,12 @@
+[run]
+source = .
+omit =
+    tests/*
+    build/*
+    dist/*
+
+[report]
+# La CI échoue sous ce seuil : toute nouveauté arrive avec ses tests.
+# Mesuré à 83 % au moment de fixer le seuil (interface comprise).
+fail_under = 80
+show_missing = False

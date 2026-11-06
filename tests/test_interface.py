@@ -1,0 +1,420 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Tests de l'interface : la vraie fenêtre PDF Studio, pilotée par programme.
+
+Chaque test est un scénario (générateur) exécuté DANS mainloop() : les
+traitements en arrière-plan rendent la main à l'interface par after(), qui
+exige une vraie boucle Tk. Un scénario rend :
+- un nombre : attendre ce nombre de millisecondes ;
+- "travaux" : attendre la fin des traitements en cours.
+Les boîtes de dialogue (fichiers, messages, mot de passe) sont remplacées par
+des réponses préparées, enregistrées pour être vérifiées.
+"""
+
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import pymupdf as fitz  # noqa: E402
+from PIL import Image, ImageDraw  # noqa: E402
+
+import installation  # noqa: E402
+import pdf_core as core  # noqa: E402
+import updater  # noqa: E402
+
+TRAVAUX = "travaux"
+
+
+# ----------------------------------------------------------------- harnais
+
+
+class Dialogues:
+    """Réponses préparées aux boîtes de dialogue, et trace de ce qui a été affiché."""
+
+    def __init__(self):
+        self.messages = []        # (type, titre, texte)
+        self.mot_de_passe = None  # réponse (ou liste de réponses successives) au mot de passe
+        self.demandes_mdp = 0
+        self.enregistrer_sous = None
+        self.dossier = None
+        self.oui_non = False
+
+
+@pytest.fixture
+def ui(monkeypatch, tmp_path):
+    """Crée l'application avec des dialogues simulés ; fournit (créer_app, dialogues)."""
+    import pdf_studio as s
+    d = Dialogues()
+    monkeypatch.setattr(s, "sauver_config", lambda c: None)
+    monkeypatch.setattr(s, "charger_config", lambda: {})
+    monkeypatch.setattr(updater, "UPDATE_MANIFEST_URL", "")
+    for nom in ("showinfo", "showwarning", "showerror"):
+        monkeypatch.setattr(s.messagebox, nom, lambda titre, texte, _n=nom, **k: d.messages.append((_n, titre, texte)))
+    monkeypatch.setattr(s.messagebox, "askyesno", lambda *a, **k: d.oui_non)
+
+    def mot_de_passe(*a, **k):
+        d.demandes_mdp += 1
+        if isinstance(d.mot_de_passe, list):
+            return d.mot_de_passe.pop(0)
+        return d.mot_de_passe
+    monkeypatch.setattr(s.simpledialog, "askstring", mot_de_passe)
+    monkeypatch.setattr(s.filedialog, "asksaveasfilename", lambda **k: d.enregistrer_sous)
+    monkeypatch.setattr(s.filedialog, "askdirectory", lambda **k: d.dossier)
+    applis = []
+
+    def creer():
+        app = s.PDFStudio()
+        app.geometry("1280x780+0+0")
+        applis.append(app)
+        return app
+
+    yield s, creer, d
+    for app in applis:
+        try:
+            app.destroy()
+        except Exception:  # noqa: BLE001 - déjà détruite par le scénario
+            pass
+    applis.clear()
+
+
+def executer(app, scenario, delai_max=90):
+    """Joue le scénario dans mainloop() ; relève dans le test toute erreur du scénario."""
+    erreurs = []
+    etapes = scenario()
+
+    def avancer(attente=None):
+        try:
+            if attente == TRAVAUX and app.travaux_en_cours:
+                app.after(50, lambda: avancer(TRAVAUX))
+                return
+            suite = next(etapes)
+            if suite == TRAVAUX:
+                app.after(50, lambda: avancer(TRAVAUX))
+            else:
+                app.after(suite or 1, avancer)
+        except StopIteration:
+            app.quit()
+        except BaseException as exc:  # noqa: BLE001 - relevée après la boucle
+            erreurs.append(exc)
+            app.quit()
+
+    def trop_long():
+        erreurs.append(TimeoutError("scénario trop long"))
+        app.quit()
+
+    app.after(200, avancer)
+    garde = app.after(delai_max * 1000, trop_long)
+    app.mainloop()
+    app.after_cancel(garde)
+    if erreurs:
+        raise erreurs[0]
+
+
+# ----------------------------------------------------------- PDF d'essai
+
+
+@pytest.fixture
+def contrat(tmp_path):
+    """Contrat de 2 pages ; la page 2 est tournée à 90° (texte droit à l'affichage)."""
+    chemin = tmp_path / "contrat.pdf"
+    doc = fitz.open()
+    for rot in (0, 90):
+        page = doc.new_page(width=595, height=842)
+        page.set_rotation(rot)
+        m = page.derotation_matrix
+        page.insert_text(fitz.Point(60, 90) * m, "Contrat de prestation", fontsize=22, rotate=rot)
+        for i, ligne in enumerate(["Le client accepte le devis.", "Montant total : 1 200 euros.",
+                                   "Le client signe ci-dessous."]):
+            page.insert_text(fitz.Point(60, 140 + 18 * i) * m, ligne, fontsize=12, rotate=rot)
+    doc.save(chemin)
+    return chemin
+
+
+@pytest.fixture
+def signature(tmp_path):
+    chemin = tmp_path / "signature.png"
+    img = Image.new("RGB", (400, 160), "white")
+    ImageDraw.Draw(img).line([(20, 120), (200, 30), (380, 110)], fill=(20, 40, 160), width=10)
+    img.save(chemin)
+    return chemin
+
+
+def superpositions(app):
+    return app.apercu.canevas.find_withtag("superposition")
+
+
+# ------------------------------------------------------------------ tests
+
+
+def test_encrypted_pdf_asks_password_then_opens(ui, contrat, tmp_path):
+    s, creer, d = ui
+    protege = tmp_path / "protege.pdf"
+    fitz.open(contrat).save(protege, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="secret")
+    app = creer()
+
+    def scenario():
+        d.mot_de_passe = ["faux", "secret"]
+        app.charger_fichier(str(protege))
+        yield 300
+        assert d.demandes_mdp == 2, "un mot de passe faux doit être redemandé"
+        assert app.apercu.doc is not None and app.apercu.doc.page_count == 2
+
+    executer(app, scenario)
+
+
+def test_cancelled_password_leaves_no_document(ui, contrat, tmp_path):
+    s, creer, d = ui
+    protege = tmp_path / "protege.pdf"
+    fitz.open(contrat).save(protege, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="x", owner_pw="x")
+    app = creer()
+
+    def scenario():
+        d.mot_de_passe = None  # l'utilisateur annule
+        app.charger_fichier(str(protege))
+        yield 200
+        assert app.apercu.doc is None and app.chemin_pdf is None
+        assert "annulée" in app.etat.cget("text")
+
+    executer(app, scenario)
+
+
+def test_search_highlights_occurrences_and_lists_pages(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Remplacer du texte")
+        app.entree_ancien.insert(0, "client")
+        app.rechercher_texte()
+        yield TRAVAUX
+        yield 200
+        assert sorted(app.resultats_recherche) == [0, 1]
+        assert len(superpositions(app)) == 2, "les 2 occurrences de la page 1 doivent être surlignées"
+        app.apercu.aller(1)  # page tournée : surlignage aussi
+        yield 300
+        assert len(superpositions(app)) == 2
+
+    executer(app, scenario)
+
+
+def test_search_on_scan_suggests_ocr(ui, tmp_path):
+    s, creer, d = ui
+    scan = tmp_path / "scan.pdf"
+    doc = fitz.open()
+    doc.new_page()  # aucune couche texte
+    doc.save(scan)
+    app = creer()
+
+    def scenario():
+        app.charger_fichier(str(scan))
+        app.afficher_page("Remplacer du texte")
+        app.entree_ancien.insert(0, "contrat")
+        app.rechercher_texte()
+        yield TRAVAUX
+        textes = [w.cget("text") for w in app.cadre_resultats.winfo_children()]
+        assert any("OCR" in t for t in textes)
+
+    executer(app, scenario)
+
+
+def test_stamp_click_drag_then_applied_on_displayed_page(ui, contrat, signature, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "signe.pdf"
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Signature / Tampon")
+        app.image_tampon = str(signature)
+        app.ratio_tampon = 160 / 400
+        app.apercu.aller(1)
+        yield 300
+        app._souris_appui(fitz.Point(300, 200))  # clic : l'image est centrée sur le clic
+        app._souris_glisse(fitz.Point(330, 250))  # glisser
+        app._souris_relache(fitz.Point(330, 250))
+        rect = app._rect_tampon()
+        assert abs(rect.x0 + rect.width / 2 - 330) < 1 and abs(rect.y0 + rect.height / 2 - 250) < 1
+        assert len(superpositions(app)) >= 2  # image + cadre en surimpression
+        d.enregistrer_sous = str(sortie)
+        app.lancer_tampon()
+        yield TRAVAUX
+        resultat = fitz.open(sortie)
+        assert not resultat[0].get_images() and resultat[1].get_images(), "tampon sur la page affichée (2)"
+        pose = core.to_displayed(resultat[1], resultat[1].get_image_rects(resultat[1].get_images()[0][0])[0])
+        assert abs(pose.x0 - rect.x0) < 1 and abs(pose.y0 - rect.y0) < 1
+
+    executer(app, scenario)
+
+
+def test_move_block_on_rotated_page_with_ghost(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "deplace.pdf"
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Déplacer du texte")
+        app.apercu.aller(1)
+        yield 300
+        bloc = core.text_blocks(app.apercu.page)[-1]
+        centre = fitz.Point((bloc.x0 + bloc.x1) / 2, (bloc.y0 + bloc.y1) / 2)
+        app._souris_appui(centre)  # clic sur un bloc encadré : sélection
+        app._souris_relache(centre)
+        assert app.selection is not None
+        app._souris_appui(centre)  # glisser la sélection : fantôme + décalage
+        app._souris_glisse(centre + (0, 100))
+        app._souris_relache(centre + (0, 100))
+        assert (app.entree_dx.get(), app.entree_dy.get()) == ("0", "100")
+        app.apercu.zoomer(1.25)  # un zoom ne doit PAS effacer la sélection
+        yield 300
+        assert app.selection is not None
+        d.enregistrer_sous = str(sortie)
+        app.lancer_deplacement()
+        yield TRAVAUX
+        page = fitz.open(sortie)[1]
+        mot = [core.to_displayed(page, w[:4]) for w in page.get_text("words") if w[4] == "signe"][0]
+        assert abs(mot.y0 - (bloc.y0 + 100)) < 3
+
+    executer(app, scenario)
+
+
+def test_page_change_clears_selection(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Déplacer du texte")
+        yield 300
+        app.selection = fitz.Rect(50, 120, 300, 200)
+        app.apercu.aller(1)
+        yield 100
+        assert app.selection is None and app.entree_zone.get() == ""
+
+    executer(app, scenario)
+
+
+def test_merge_reorders_selected_file(ui, tmp_path):
+    s, creer, d = ui
+    fichiers = []
+    for nom, pages in (("a", 1), ("b", 2), ("c", 3)):
+        doc = fitz.open()
+        for _ in range(pages):
+            doc.new_page()
+        doc.save(tmp_path / f"{nom}.pdf")
+        fichiers.append(str(tmp_path / f"{nom}.pdf"))
+    app = creer()
+    sortie = tmp_path / "fusion.pdf"
+
+    def scenario():
+        app.afficher_page("Fusion")
+        app.liste_fusion = list(fichiers)
+        app._choisir_fusion(2)
+        app.deplacer_fusion(-1)  # c remonte avant b
+        app.deplacer_fusion(-1)  # puis avant a
+        app._choisir_fusion(2)
+        app.retirer_fusion()     # b retiré
+        assert [os.path.basename(f) for f in app.liste_fusion] == ["c.pdf", "a.pdf"]
+        d.enregistrer_sous = str(sortie)
+        app.lancer_fusion()
+        yield TRAVAUX
+        resultat = fitz.open(sortie)
+        assert resultat.page_count == 4
+        assert [t[1] for t in resultat.get_toc()] == ["c.pdf", "a.pdf"]
+
+    executer(app, scenario)
+
+
+def test_business_error_is_shown_not_crashing(ui, contrat, tmp_path):
+    """Régression : le message d'erreur plantait (variable `exc` lue après le except)."""
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.charger_fichier(str(contrat))
+        app.afficher_page("Division")
+        app.mode_division.set("plages")
+        app.entree_plages.insert(0, "1-9")
+        d.dossier = str(tmp_path)
+        app.lancer_division()
+        yield TRAVAUX
+        yield 100
+        assert ("showwarning", "PDF Studio", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
+
+    executer(app, scenario)
+
+
+def test_ocr_from_interface_frames_words(ui, tmp_path):
+    if core.find_tessdata() is None:
+        pytest.skip("tessdata absent")
+    s, creer, d = ui
+    texte = fitz.open()
+    texte.new_page(width=400, height=300).insert_text((40, 80), "Bonjour le monde", fontsize=24)
+    scan = tmp_path / "scan.pdf"
+    doc = fitz.open()
+    doc.new_page(width=400, height=300).insert_image(fitz.Rect(0, 0, 400, 300), pixmap=texte[0].get_pixmap(dpi=200))
+    doc.save(scan)
+    app = creer()
+    sortie = tmp_path / "scan_ocr.pdf"
+
+    def scenario():
+        app.charger_fichier(str(scan))
+        app.afficher_page("OCR (scans)")
+        d.enregistrer_sous = str(sortie)
+        app.continuer_ocr.set(True)
+        app.lancer_ocr()
+        yield TRAVAUX
+        yield 300
+        assert fitz.open(sortie)[0].search_for("Bonjour")
+        assert app.chemin_pdf == str(sortie), "continuer sur le fichier résultat"
+        assert len(superpositions(app)) >= 3, "mots reconnus encadrés"
+
+    executer(app, scenario)
+
+
+@pytest.mark.parametrize("portable, installe, attendu", [
+    (True, False, "Installer sur ce PC"),
+    (True, True, "Réinstaller sur ce PC"),
+    (False, False, None),  # lancé depuis les sources, ou version installée
+])
+def test_install_button_only_in_portable_mode(ui, monkeypatch, portable, installe, attendu):
+    s, creer, d = ui
+    monkeypatch.setattr(installation, "exe_courant", lambda: "PDFStudio.exe" if portable else None)
+    monkeypatch.setattr(installation, "tourne_depuis_installation", lambda *a: False)
+    monkeypatch.setattr(installation, "est_installe", lambda *a: installe)
+    app = creer()
+
+    def scenario():
+        yield 100
+        textes = [w.cget("text") for w in app.winfo_children()[0].winfo_children()
+                  if isinstance(w, s.ctk.CTkButton)]
+        trouves = [t for t in textes if "nstaller sur ce PC" in t]
+        if attendu is None:
+            assert not trouves
+        else:
+            assert trouves and attendu in trouves[0]
+
+    executer(app, scenario)
+
+
+def test_update_popup_offers_and_can_skip_version(ui, monkeypatch):
+    s, creer, d = ui
+    enregistre = {}
+    monkeypatch.setattr(s, "sauver_config", lambda c: enregistre.update(c))
+    app = creer()
+
+    def scenario():
+        app._popup_mise_a_jour(updater.Update("9.9.9", "https://exemple/PDFStudio.exe", None, "Nouveautés"))
+        yield 300
+        popup = [w for w in app.winfo_children() if isinstance(w, s.ctk.CTkToplevel)][-1]
+        cases = [w for w in popup.winfo_children() if isinstance(w, s.ctk.CTkCheckBox)]
+        cases[0].select()
+        [w for w in popup.winfo_children() if isinstance(w, s.ctk.CTkButton) and w.cget("text") == "Plus tard"][0].invoke()
+        yield 100
+        assert enregistre.get("version_ignoree") == "9.9.9"
+        assert not popup.winfo_exists()
+
+    executer(app, scenario)

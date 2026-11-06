@@ -42,7 +42,12 @@ jobs:
           }
 
       - name: Analyse du code
-        run: python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py installation.py tests
+        run: python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py installation.py verification.py publication.py tests
 
+      # Tests du cœur ET de l'interface (vraie fenêtre Tk, pilotée par programme).
       - name: Tests
-        run: python -m pytest tests -q
+        run: python -m coverage run -m pytest -q
+
+      # Échoue sous le seuil fixé dans .coveragerc.
+      - name: Couverture
+        run: python -m coverage report

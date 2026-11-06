@@ -201,6 +201,13 @@ class Apercu(ctk.CTkFrame):
         sombre = ctk.get_appearance_mode() == "Dark"
         self.canevas.configure(bg="#1e1e1e" if sombre else "#d4d4d4")
 
+    def destroy(self):
+        """Annule un rendu encore planifié : il viserait une fenêtre disparue."""
+        if self._rendu_prevu is not None:
+            self.after_cancel(self._rendu_prevu)
+            self._rendu_prevu = None
+        super().destroy()
+
     def changer_theme(self):
         self._appliquer_couleurs()
         self._planifier_rendu()

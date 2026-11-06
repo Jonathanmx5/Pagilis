@@ -41,15 +41,35 @@ Tesseract, analyse le code, lance les tests et produit `dist\PDFStudio.exe`.
 
 ## Publier une version
 
-Pousser un tag suffit, la CI fait le reste (tests, exe, `version.json`, release) :
+1. Écrire les nouveautés dans `CHANGELOG.md`, section `## [1.2.0]` : elles
+   s'affichent dans la fenêtre de mise à jour, et la CI refuse de publier une
+   version sans notes.
+2. Pousser un tag, la CI fait le reste (tests, exe, auto-vérification de l'exe,
+   `version.json`, release) :
 
 ```bat
-git tag v1.0.2
-git push origin v1.0.2
+git tag v1.2.0-beta.1
+git push origin v1.2.0-beta.1
 ```
 
-Le numéro vient du tag. Pour un exe d'essai sans publication : onglet
-**Actions > Release > Run workflow**, puis télécharger l'artefact.
+Une **bêta** (`-beta.N`) n'est proposée qu'aux utilisateurs qui ont activé
+« Versions bêta ». Quand elle a fait ses preuves, publier `v1.2.0` pour tous.
+
+Numérotation : CORRECTIF (1.2.1) = corrections seulement ; MINEUR (1.3.0) =
+nouveautés ; MAJEUR (2.0.0) = changements qui cassent des habitudes.
+
+Pour un exe d'essai sans publication : onglet **Actions > Release > Run
+workflow**, puis télécharger l'artefact.
+
+## Sûreté des mises à jour
+
+- Empreinte SHA-256 vérifiée après téléchargement.
+- La nouvelle version doit réussir `PDFStudio.exe --verifier` (PDF, OCR,
+  interface) **avant** de remplacer l'ancienne ; sinon l'ancienne est conservée.
+- La version remplacée est sauvegardée dans
+  `%LOCALAPPDATA%\PDFStudio\version-precedente`.
+- Si le remplacement échoue (fichier verrouillé), il est abandonné après 30
+  essais et l'ancienne version est restaurée.
 
 ## Licence
 
