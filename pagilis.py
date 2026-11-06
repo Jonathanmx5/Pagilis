@@ -587,11 +587,16 @@ def main() -> None:
             identite.NOM_AFFICHE, f"{identite.ANCIEN_NOM} s'appelle désormais {identite.NOM_AFFICHE}.\n\n"
                           "Vos préférences sont conservées ; les raccourcis et l'entrée dans "
                           "« Applications installées » portent le nouveau nom."))
-    # « Ouvrir avec Pagilis » ou PDF glissé sur l'exe : le chemin arrive en argument.
-    fichiers = [a for a in arguments if a.lower().endswith(".pdf") and os.path.isfile(a)]
+    # « Ouvrir avec Pagilis PDF » ou fichier glissé sur l'exe : le chemin arrive en argument.
+    fichiers = fichiers_a_ouvrir(arguments)
     if fichiers:
         app.after(200, lambda: app.ouvrir_document(os.path.abspath(fichiers[0])))
     app.mainloop()
+
+
+def fichiers_a_ouvrir(arguments: list[str], existe=os.path.isfile) -> list[str]:
+    """PDF et documents Word passés en argument (les options sont ignorées)."""
+    return [a for a in arguments if (a.lower().endswith(".pdf") or conversion.est_word(a)) and existe(a)]
 
 
 def migrer_installation_pdf_studio(arguments: list[str]) -> bool:

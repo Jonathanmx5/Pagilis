@@ -1094,3 +1094,73 @@ def test_log_file_is_size_limited():
     fichiers = [h for h in logging.getLogger().handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
     assert fichiers and fichiers[0].maxBytes == 1_000_000 and fichiers[0].backupCount == 3
     assert fichiers[0].baseFilename.endswith("pagilis.log") and s.DOSSIER_DONNEES in fichiers[0].baseFilename
+
+
+# ------------------------------------------------------- petits défauts connus
+
+
+def test_drag_back_to_start_changes_nothing(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        depart = centre_mot(app.apercu.page, "signe")
+        app._souris_appui(depart)
+        app._souris_glisse(depart + (0, 80))
+        app._souris_glisse(depart)
+        app._souris_relache(depart)
+        assert not app.edition.modifie and not app.edition.peut_annuler
+
+    executer(app, scenario)
+
+
+def test_ctrl_s_during_entry_validates_then_saves(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "direct.pdf"
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        m = app.fonctions["Modifier"]
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        m.saisie.delete(0, "end")
+        m.saisie.insert(0, "Montant total : 7 euros.")
+        d.enregistrer_sous = str(sortie)
+        m.touche_enregistrer()
+        yield TRAVAUX
+        assert m.saisie is None
+        assert "Montant total : 7 euros." in " ".join(fitz.open(sortie)[1].get_text().split())
+
+    executer(app, scenario)
+
+
+def test_no_then_failed_word_conversion_keeps_edits_marked(ui, contrat, tmp_path, monkeypatch):
+    s, creer, d = ui
+    app = creer()
+
+    def echec(*a, **k):
+        raise core.PagilisError("Pour ouvrir un fichier Word, Microsoft Word ou LibreOffice doit être installé.")
+
+    monkeypatch.setattr(s.conversion, "word_vers_pdf", echec)
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = False  # « Non » : ne pas enregistrer…
+        app.ouvrir_document(str(tmp_path / "lettre.docx"))
+        yield TRAVAUX  # … mais la conversion échoue : on reste sur le document retouché
+        assert app.edition.source == str(contrat)
+        assert app.edition.modifie and "•" in app.title()
+
+    executer(app, scenario)
+
+
+def test_command_line_opens_pdf_and_word():
+    import pagilis as s
+    arguments = ["--renomme", r"C:\x\a.pdf", r"C:\x\b.docx", r"C:\x\c.txt"]
+    assert s.fichiers_a_ouvrir(arguments, existe=lambda c: True) == [r"C:\x\a.pdf", r"C:\x\b.docx"]
+    assert s.fichiers_a_ouvrir(arguments, existe=lambda c: False) == []

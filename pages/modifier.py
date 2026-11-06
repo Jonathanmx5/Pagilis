@@ -83,7 +83,13 @@ class PageModifier(PageCopie):
         self._fermer_saisie()
 
     def raccourcis_permis(self) -> bool:
-        return self.saisie is None  # dans la zone de saisie, Ctrl+Z / Ctrl+S ne retouchent pas
+        return self.saisie is None  # dans la zone de saisie, Ctrl+Z ne retouche pas le document
+
+    def touche_enregistrer(self):
+        """Ctrl+S dans la zone de saisie : la correction est validée, puis enregistrée."""
+        if self.saisie is not None and not self.app.travaux_en_cours:
+            self._valider_saisie()
+        super().touche_enregistrer()
 
     def dessiner(self, apercu):
         canevas = apercu.canevas
@@ -131,6 +137,9 @@ class PageModifier(PageCopie):
         depart, ligne, bloc, courant = self._geste
         self._geste = None
         if courant is not None:
+            if abs(point.x - depart.x) + abs(point.y - depart.y) < 0.5:
+                self.apercu.redessiner()  # bloc ramené à sa place : rien à réécrire
+                return
             index = self.apercu.index
             self.retoucher(lambda: self.edition.deplacer(index, bloc, point.x - depart.x,
                                                           point.y - depart.y))

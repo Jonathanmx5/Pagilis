@@ -144,3 +144,7 @@ def test_timeout_kills_the_word_started_by_the_script(faux, tmp_path, monkeypatc
 
 def test_word_script_never_quits_a_word_already_in_use():
     assert "Documents.Count -eq 0" in conversion.SCRIPT_WORD
+
+
+def test_word_errors_keep_their_accents():
+    assert "OutputEncoding" in conversion.SCRIPT_WORD

@@ -25,6 +25,7 @@ MARQUEUR_MOT_DE_PASSE = "MOT_DE_PASSE"
 # document protégé au lieu d'afficher une boîte de dialogue invisible.
 SCRIPT_WORD = r"""
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8   # messages d'erreur avec leurs accents
 $word = $null; $doc = $null
 try {
     # Word lancé par COM n'est pas un enfant de ce script : on note son PID
@@ -94,7 +95,7 @@ def _tuer_word_lance(fichier_pid: Optional[str]) -> None:
 
 
 def _executer(commande: list[str], delai: int) -> subprocess.CompletedProcess:
-    return subprocess.run(commande, capture_output=True, text=True, errors="replace", timeout=delai,
+    return subprocess.run(commande, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=delai,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 

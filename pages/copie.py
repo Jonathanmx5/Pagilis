@@ -160,7 +160,7 @@ class PageCopie(PageFonction):
             if self.app.charger_fichier(self.app.chemin_pdf):
                 self.app.edition = Edition(self.apercu.doc, source, origine_word=word)
                 self.app.label_fichier.configure(text=os.path.basename(source))
-        else:
-            ed.modifie = False
+        # « Non » sans abandon (fermer, ouvrir un autre fichier) : les retouches restent
+        # marquées ; si l'ouverture échoue, on retrouve le document tel qu'il était.
         self.maj_etat()
         return True
