@@ -84,23 +84,34 @@ class PDFStudio(ctk.CTk):
         self.etat.pack(fill="x", padx=12, pady=(4, 8))
         self.protocol("WM_DELETE_WINDOW", self._fermer)
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
-        threading.Thread(target=self._chercher_mise_a_jour, daemon=True).start()
+        # La version ignorée est lue ici, dans le thread de l'interface.
+        version_ignoree = self.config_data.get("version_ignoree")
+        threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree,), daemon=True).start()
 
     # ------------------------------------------------------ mises à jour
 
-    def _chercher_mise_a_jour(self):
+    def _chercher_mise_a_jour(self, version_ignoree: str | None):
         mise_a_jour = updater.check_for_update()
-        if mise_a_jour:
+        # « Ne plus me proposer cette version » : on se tait pour CETTE version seulement.
+        if mise_a_jour and mise_a_jour.version != version_ignoree:
             self.after(0, lambda: self._popup_mise_a_jour(mise_a_jour))
 
     def _popup_mise_a_jour(self, mise_a_jour: updater.Update):
         """Popup facultatif : « Plus tard » ou la croix ferment le popup sans rien installer."""
         popup = ctk.CTkToplevel(self)
         popup.title("Mise à jour disponible")
-        popup.geometry("420x220")
+        popup.geometry("420x260")
         popup.resizable(False, False)
         popup.transient(self)
-        popup.protocol("WM_DELETE_WINDOW", popup.destroy)
+        ne_plus_proposer = ctk.BooleanVar(value=False)
+
+        def plus_tard():
+            if ne_plus_proposer.get():
+                self.config_data["version_ignoree"] = mise_a_jour.version
+                sauver_config(self.config_data)
+            popup.destroy()
+
+        popup.protocol("WM_DELETE_WINDOW", plus_tard)
         ctk.CTkLabel(
             popup,
             text=f"Une mise à jour est disponible (version {mise_a_jour.version}).\n"
@@ -114,8 +125,9 @@ class PDFStudio(ctk.CTk):
         etat.pack(pady=6)
         bouton_maj = ctk.CTkButton(popup, text="Mettre à jour")
         bouton_maj.pack(pady=4)
-        bouton_quitter = ctk.CTkButton(popup, text="Plus tard", fg_color="gray", command=popup.destroy)
+        bouton_quitter = ctk.CTkButton(popup, text="Plus tard", fg_color="gray", command=plus_tard)
         bouton_quitter.pack(pady=4)
+        ctk.CTkCheckBox(popup, text="Ne plus me proposer cette version", variable=ne_plus_proposer).pack(pady=(4, 12))
 
         def installer():
             bouton_maj.configure(state="disabled")
