@@ -15,14 +15,19 @@ from PIL import Image  # noqa: E402
 # ------------------------------------------------------------- utilitaires
 
 
-def make_pdf(path, pages=1, texts=None, rotation=0):
-    """Crée un PDF de `pages` pages. texts : liste de (x, y, texte) par page."""
+def make_pdf(path, pages=1, texts=None, rotation=0, size=(400, 400)):
+    """Crée un PDF de `pages` pages tournées de `rotation`.
+
+    texts : {page: [(x, y, texte)]}, avec (x, y) la ligne de base dans le repère
+    AFFICHÉ ; le texte apparaît droit à l'affichage, comme dans un vrai document.
+    """
     doc = fitz.open()
     for i in range(pages):
-        page = doc.new_page(width=400, height=400)
-        for x, y, txt in (texts or {}).get(i, []):
-            page.insert_text((x, y), txt, fontname="helv", fontsize=12)
+        page = doc.new_page(width=size[0], height=size[1])
         page.set_rotation(rotation)
+        for x, y, txt in (texts or {}).get(i, []):
+            page.insert_text(fitz.Point(x, y) * page.derotation_matrix, txt,
+                             fontname="helv", fontsize=12, rotate=rotation)
     doc.save(path)
     doc.close()
     return str(path)
@@ -188,12 +193,47 @@ def test_replace_empty_erases(tmp_path):
     assert "ce" not in doc[0].get_text().split()
 
 
-def test_replace_on_rotated_page(tmp_path):
-    src = make_pdf(tmp_path / "src.pdf", texts={0: [(50, 100, "Texte original")]}, rotation=90)
+def displayed_rect(page, needle):
+    """Rectangle d'un mot dans le repère affiché."""
+    r = page.search_for(needle)[0] * page.rotation_matrix
+    r.normalize()
+    return r
+
+
+def displayed_origin(page, needle):
+    """Origine (ligne de base) du segment contenant `needle`, dans le repère affiché.
+
+    Indépendante de la police, contrairement au rectangle (jambages différents).
+    """
+    for bloc in page.get_text("dict")["blocks"]:
+        for line in bloc.get("lines", []):
+            for span in line["spans"]:
+                if needle in span["text"]:
+                    return fitz.Point(span["origin"]) * page.rotation_matrix
+    raise AssertionError(f"{needle!r} introuvable")
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_replace_on_rotated_page(tmp_path, rotation):
+    src = make_pdf(
+        tmp_path / "src.pdf",
+        texts={0: [(50, 100, "Texte original ici"), (50, 113, "ligne serree")]},
+        rotation=rotation,
+        size=(400, 500),  # page non carrée : une erreur de repère se verrait
+    )
     doc = fitz.open(src)
+    page = doc[0]
+    avant = displayed_origin(page, "Texte")
     n = core.replace_text(doc, "original", "nouveau", [0])
     assert n == 1
-    assert "nouveau" in doc[0].get_text()
+    texte = " ".join(page.get_text().split())
+    assert "Texte nouveau ici" in texte and "ligne serree" in texte
+    assert texte.count("Texte") == 1  # pas de doublon
+    # Même ligne de base, et la ligne se lit toujours horizontalement.
+    apres = displayed_origin(page, "Texte")
+    assert abs(apres.x - avant.x) < 0.5 and abs(apres.y - avant.y) < 0.5
+    rect = displayed_rect(page, "Texte")
+    assert rect.width > rect.height
     doc.close()
 
 
@@ -207,14 +247,20 @@ def test_find_text_counts_pages(tmp_path):
 # ------------------------------------------------------ déplacement
 
 
-def test_move_text_block(tmp_path):
-    src = make_pdf(tmp_path / "src.pdf", texts={0: [(50, 100, "Bloc a bouger")]})
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_move_text_block(tmp_path, rotation):
+    src = make_pdf(tmp_path / "src.pdf", texts={0: [(50, 100, "Bloc a bouger")]},
+                   rotation=rotation, size=(400, 500))
     doc = fitz.open(src)
-    n = core.move_text_block(doc, 0, fitz.Rect(40, 85, 200, 105), 0, 50)
+    page = doc[0]
+    avant = displayed_origin(page, "Bloc")
+    # Zone et décalage saisis dans le repère affiché : 30 à droite, 50 vers le bas.
+    n = core.move_text_block(doc, 0, fitz.Rect(40, 85, 200, 105), 30, 50)
     assert n >= 1
-    blocs = doc[0].get_text("dict")["blocks"]
-    y_bas = max(b["bbox"][3] for b in blocs if b["type"] == 0)
-    assert y_bas > 140  # le texte est descendu de ~50 points
+    apres = displayed_origin(page, "Bloc")
+    assert abs(apres.x - avant.x - 30) < 0.5
+    assert abs(apres.y - avant.y - 50) < 0.5
+    assert len(page.search_for("Bloc")) == 1  # l'original a bien été effacé
     doc.close()
 
 
@@ -264,11 +310,27 @@ def test_ocr_skipped_without_tessdata(tmp_path, monkeypatch):
     doc.close()
 
 
-def test_ocr_real_if_tessdata(tmp_path):
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_ocr_real_if_tessdata(tmp_path, rotation):
     if core.find_tessdata() is None:
         pytest.skip("tessdata absent : test OCR ignoré")
-    src = make_pdf(tmp_path / "src.pdf", texts={0: [(50, 100, "Bonjour le monde")]})
-    doc = fitz.open(src)
-    doc[0].get_text()
+    # Fabrique un « scan » : une page qui ne contient qu'une image du texte.
+    texte = fitz.open()
+    texte.new_page(width=400, height=400).insert_text((50, 100), "Bonjour le monde", fontsize=24)
+    pix = texte[0].get_pixmap(dpi=200)
+    doc = fitz.open()
+    # Comme un vrai scan tourné : image couchée dans le fichier, redressée par /Rotate.
+    page = doc.new_page(width=400, height=400)
+    page.set_rotation(rotation)
+    page.insert_image(fitz.Rect(0, 0, 400, 400), pixmap=pix, rotate=rotation)
+    # Le surlignage doit tomber sur le mot IMPRIMÉ, dans le repère affiché.
+    attendu = fitz.Rect(50, 78, 145, 104)
+    assert not core.has_text(doc[0])
     assert core.ocr_pages(doc, [0]) == 1
+    rects = doc[0].search_for("Bonjour")
+    assert rects, f"mot introuvable après OCR (rotation {rotation})"
+    # search_for répond dans le repère non tourné : on compare dans le repère affiché.
+    trouve = rects[0] * doc[0].rotation_matrix
+    trouve.normalize()
+    assert trouve.intersects(attendu)
     doc.close()

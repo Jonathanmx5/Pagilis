@@ -334,14 +334,21 @@ def _style_flags(span: dict) -> tuple[bool, bool, bool, bool]:
     return gras, italique, serif, mono
 
 
-def _horizontal_line(line: dict) -> bool:
+def _displayed_vector(page: fitz.Page, dx: float, dy: float) -> fitz.Point:
+    """Vecteur du repère non tourné exprimé dans le repère affiché (sans translation)."""
+    m = page.rotation_matrix
+    return fitz.Point(dx, dy) * m - fitz.Point(0, 0) * m
+
+
+def _horizontal_line(line: dict, page: fitz.Page) -> bool:
     """Ne garde que les lignes qui se lisent horizontalement sur la page affichée.
 
-    get_text renvoie les coordonnées dans le repère AFFICHÉ, donc la direction
-    de lecture 'dir' s'interprète directement.
+    get_text renvoie les coordonnées dans le repère NON TOURNÉ : on ramène la
+    direction de lecture 'dir' dans le repère affiché avant de la tester.
     """
     dx, dy = line.get("dir", (1.0, 0.0))
-    return abs(dy) < 0.01 and dx > 0
+    v = _displayed_vector(page, dx, dy)
+    return abs(v.y) < 0.01 and v.x > 0
 
 
 def iter_lines(page: fitz.Page) -> Iterable[tuple[dict, list[dict]]]:
@@ -351,14 +358,14 @@ def iter_lines(page: fitz.Page) -> Iterable[tuple[dict, list[dict]]]:
         if bloc.get("type") != 0:
             continue
         for line in bloc["lines"]:
-            if _horizontal_line(line):
+            if _horizontal_line(line, page):
                 yield line, [c for s in line["spans"] for c in s.get("chars", [])]
 
 
 def _find_matches(page: fitz.Page, needle: str, match_case: bool) -> list[fitz.Rect]:
     """Recherche caractère par caractère, ligne par ligne (pas de search_for).
 
-    Retourne les rectangles (repère affiché) des occurrences trouvées
+    Retourne les rectangles (repère non tourné) des occurrences trouvées
     sur UNE seule ligne.
     """
     if not needle:
@@ -446,11 +453,18 @@ def _redact_rects(page: fitz.Page, rects: list[fitz.Rect]) -> None:
     """Efface le texte sans boîte blanche, en ne touchant ni images ni dessins.
 
     La zone est réduite à sa bande verticale centrale pour ne pas effacer
-    les lignes voisines serrées. Les rectangles sont dans le repère affiché.
+    les lignes voisines serrées. Les rectangles sont dans le repère non tourné,
+    comme ceux de get_text.
     """
     for rect in rects:
-        marge = rect.height * 0.15
-        bande = fitz.Rect(rect.x0 - 0.5, rect.y0 + marge, rect.x1 + 0.5, rect.y1 - marge)
+        if page.rotation in (90, 270):
+            # La ligne affichée horizontale est verticale dans le repère non tourné :
+            # on réduit donc la zone selon x.
+            marge = rect.width * 0.15
+            bande = fitz.Rect(rect.x0 + marge, rect.y0 - 0.5, rect.x1 - marge, rect.y1 + 0.5)
+        else:
+            marge = rect.height * 0.15
+            bande = fitz.Rect(rect.x0 - 0.5, rect.y0 + marge, rect.x1 + 0.5, rect.y1 - marge)
         page.add_redact_annot(bande, fill=False)
     if rects:
         page.apply_redactions(
@@ -462,7 +476,8 @@ def _redact_rects(page: fitz.Page, rects: list[fitz.Rect]) -> None:
 def _write_span(page: fitz.Page, span: TextSpan, origin: fitz.Point, shrink: float = 1.0) -> None:
     """Réécrit un segment au même style, à la même ligne de base.
 
-    origin est dans le repère affiché ; insert_text attend le repère non tourné.
+    origin est dans le repère non tourné, comme get_text et insert_text ;
+    rotate=page.rotation fait apparaître le texte droit à l'affichage.
     """
     fontname, fontfile = _font_for(span)
     kwargs = dict(
@@ -473,7 +488,7 @@ def _write_span(page: fitz.Page, span: TextSpan, origin: fitz.Point, shrink: flo
     )
     if fontfile:
         kwargs["fontfile"] = fontfile
-    page.insert_text(fitz.Point(origin) * page.derotation_matrix, span.text, **kwargs)
+    page.insert_text(fitz.Point(origin), span.text, **kwargs)
 
 
 def _rgb(color: int) -> tuple[float, float, float]:
@@ -550,9 +565,12 @@ def move_text_block(
     Retourne le nombre de segments déplacés.
     """
     page = doc[page_index]
-    # rect et les coordonnées du texte sont tous deux dans le repère affiché.
-    zone = fitz.Rect(rect)
+    # rect est saisi dans le repère affiché ; le texte est dans le repère non tourné.
+    zone = fitz.Rect(rect) * page.derotation_matrix
     zone.normalize()
+    # Le décalage affiché (dx, dy) devient un vecteur du repère non tourné.
+    m = page.derotation_matrix
+    decalage = fitz.Point(dx, dy) * m - fitz.Point(0, 0) * m
     lignes = []
     for line, _chars in iter_lines(page):
         if fitz.Rect(line["bbox"]).intersects(zone):
@@ -564,7 +582,7 @@ def move_text_block(
     compte = 0
     for spans in lignes:
         for span in spans:
-            _write_span(page, span, span.origin + fitz.Point(dx, dy))
+            _write_span(page, span, span.origin + decalage)
             compte += 1
     return compte
 
@@ -630,9 +648,11 @@ def ocr_pages(
         pix = page.get_pixmap(dpi=dpi)
         pdf_ocr = fitz.open("pdf", pix.pdfocr_tobytes(language=language, tessdata=dossier))
         mots = pdf_ocr[0].get_text("words")
-        echelle = 72.0 / dpi
+        # Le PDF d'OCR est déjà en points (taille du pixmap × 72/dpi) ; on recale
+        # quand même sur la largeur affichée pour absorber les arrondis.
+        echelle = page_size_displayed(page)[0] / pdf_ocr[0].rect.width
         for x0, y0, x1, y1, mot, *_ in mots:
-            # Coordonnées pixel -> points, dans le repère affiché (celui de l'OCR).
+            # Coordonnées du PDF d'OCR -> repère affiché de la page.
             rect_affiche = fitz.Rect(x0 * echelle, y0 * echelle, x1 * echelle, y1 * echelle)
             hauteur = max(rect_affiche.height, 1.0)
             taille = hauteur * 0.9
