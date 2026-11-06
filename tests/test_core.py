@@ -237,6 +237,51 @@ def test_replace_on_rotated_page(tmp_path, rotation):
     doc.close()
 
 
+def test_replace_keeps_bold_and_serif_styles(tmp_path):
+    """Gras et normal sur la même ligne : chacun garde sa police (bug du nom commun)."""
+    chemin = str(tmp_path / "styles.pdf")
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 100), "Titre", fontname="hebo", fontsize=12)  # Helvetica gras
+    page.insert_text((90, 100), "normal", fontname="helv", fontsize=12)
+    page.insert_text((50, 140), "Serif ici", fontname="tiro", fontsize=12)  # Times
+    doc.save(chemin)
+    doc.close()
+    doc = fitz.open(chemin)
+    core.replace_text(doc, "normal", "changé", [0])
+    core.replace_text(doc, "ici", "là", [0])
+    polices = {" ".join(s["text"].split()): s["font"] for b in doc[0].get_text("dict")["blocks"]
+               for l in b["lines"] for s in l["spans"]}
+    assert "Bold" in polices["Titre"]
+    assert "Bold" not in polices["changé"]
+    assert "Times" in polices["Serif là"]
+    doc.close()
+
+
+def test_stamp_preparation_is_fast_and_partial_opacity(tmp_path):
+    import io
+    import time
+    png = make_png(tmp_path / "grande.png", color=(10, 20, 30), size=(3000, 2000))
+    debut = time.time()
+    data = core._prepare_stamp_image(png, core.StampOptions(0, 0, 10, opacity=0.5, white_transparent=True))
+    assert time.time() - debut < 1.0
+    pixel = Image.open(io.BytesIO(data)).getpixel((0, 0))
+    assert pixel[:3] == (10, 20, 30) and pixel[3] == 127  # sombre : gardé, à moitié opaque
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_find_text_rects_in_displayed_space(tmp_path, rotation):
+    src = make_pdf(tmp_path / "src.pdf", texts={0: [(60, 120, "cible")]}, rotation=rotation, size=(400, 500))
+    doc = fitz.open(src)
+    rects = core.find_text_rects(doc, "cible")[0]
+    # La ligne de base affichée est à (60, 120) : le rectangle doit l'entourer.
+    assert abs(rects[0].x0 - 60) < 1 and rects[0].y0 < 120 < rects[0].y1 + 3
+    assert rects[0].width > rects[0].height
+    blocs = core.text_blocks(doc[0])
+    assert len(blocs) == 1 and blocs[0].contains(rects[0])
+    doc.close()
+
+
 def test_find_text_counts_pages(tmp_path):
     src = make_pdf(tmp_path / "src.pdf", texts={0: [(50, 100, "abc abc")], 1: [(50, 100, "rien")]})
     doc = fitz.open(src)

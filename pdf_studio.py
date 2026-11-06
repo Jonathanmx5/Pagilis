@@ -2,18 +2,36 @@
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import threading
 import traceback
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
 import pymupdf as fitz
+from PIL import Image, ImageTk
 
 import pdf_core as core
 import updater
+from apercu import Apercu
+
+# Limites connues, affichées dans « Aide et limites ».
+LIMITES = """Limites connues de PDF Studio
+
+• Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée
+  (les polices incorporées sont des sous-ensembles). Le texte est réécrit en
+  Arial, Times New Roman ou Courier New selon son style.
+• Pas de recherche à cheval sur deux lignes.
+• Pas de détection des pages à l'envers ou couchées à 90° (cela demanderait
+  un modèle d'orientation).
+• Le redressement des pages penchées et le remplacement de texte sur un scan
+  ne sont pas encore disponibles.
+• Un .exe non signé peut être signalé par Windows Defender.
+
+Journal d'erreurs : {log}"""
 
 # Dossier de configuration et journal, indispensables avec --noconsole.
 DOSSIER_DONNEES = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "PDFStudio")
@@ -62,26 +80,29 @@ class PDFStudio(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("PDF Studio")
-        self.geometry("1000x660")
-        self.minsize(860, 560)
+        self.geometry("1280x780")
+        self.minsize(1080, 640)
         self.config_data = charger_config()
         self.dernier_dossier = self.config_data.get("dernier_dossier", os.path.expanduser("~"))
         self.chemin_pdf: str | None = None
-        # Nombre de traitements en cours : la mise à jour est bloquée tant qu'il est > 0.
+        self.page_active = FONCTIONS[0][0]
+        self._geste = None  # geste souris en cours dans l'aperçu
+        # Nombre de traitements en cours : la mise à jour est bloquée tant qu'il est > 0,
+        # et l'aperçu ne rend rien (PyMuPDF n'est pas thread-safe).
         self.travaux_en_cours = 0
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self._construire_barre_laterale()
 
-        # Zone principale : en-tête (titre + fichier courant), page, barre d'état.
+        # Zone principale : en-tête, formulaire à gauche + aperçu à droite, barre d'état.
         principal = ctk.CTkFrame(self, fg_color="transparent")
         principal.grid(row=0, column=1, sticky="nsew", padx=20, pady=16)
-        principal.grid_columnconfigure(0, weight=1)
+        principal.grid_columnconfigure(1, weight=1)
         principal.grid_rowconfigure(1, weight=1)
 
         entete = ctk.CTkFrame(principal, fg_color="transparent")
-        entete.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        entete.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
         entete.grid_columnconfigure(0, weight=1)
         self.titre_page = ctk.CTkLabel(entete, text="", font=ctk.CTkFont(size=24, weight="bold"), anchor="w")
         self.titre_page.grid(row=0, column=0, sticky="w")
@@ -96,9 +117,19 @@ class PDFStudio(ctk.CTk):
         # Une page (défilante) par fonction ; une seule est visible à la fois.
         self.pages: dict[str, ctk.CTkScrollableFrame] = {}
         for nom, _icone, _description in FONCTIONS:
-            page = ctk.CTkScrollableFrame(principal, corner_radius=10)
+            page = ctk.CTkScrollableFrame(principal, corner_radius=10, width=380)
             page.grid_columnconfigure(0, weight=1)
             self.pages[nom] = page
+
+        # Aperçu partagé par toutes les fonctions.
+        self.apercu = Apercu(principal, occupe=lambda: self.travaux_en_cours > 0, corner_radius=10)
+        self.apercu.grid(row=1, column=1, sticky="nsew", padx=(12, 0))
+        self.apercu.on_page = self._page_changee
+        self.apercu.on_dessin = self._dessiner_superpositions
+        self.apercu.on_appui = self._souris_appui
+        self.apercu.on_glisse = self._souris_glisse
+        self.apercu.on_relache = self._souris_relache
+
         self._construire_fusion()
         self._construire_division()
         self._construire_tampon()
@@ -107,7 +138,7 @@ class PDFStudio(ctk.CTk):
         self._construire_ocr()
 
         etat = ctk.CTkFrame(principal, fg_color="transparent")
-        etat.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        etat.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         etat.grid_columnconfigure(0, weight=1)
         self.etat = ctk.CTkLabel(etat, text="Prêt", anchor="w")
         self.etat.grid(row=0, column=0, sticky="w")
@@ -160,12 +191,19 @@ class PDFStudio(ctk.CTk):
             command=lambda choix: self._changer_apparence(themes[choix]),
         )
         menu.set(next(k for k, v in themes.items() if v == actuel))
-        menu.grid(row=5 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 20))
+        menu.grid(row=5 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 8))
+        ctk.CTkButton(barre, text="Aide et limites", fg_color="transparent", border_width=1,
+                      text_color=("gray10", "gray90"), command=self.afficher_aide).grid(
+            row=6 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 20))
         ctk.set_appearance_mode(actuel)
 
     def _changer_apparence(self, mode: str):
         ctk.set_appearance_mode(mode)
         self.config_data["apparence"] = mode
+        self.apercu.changer_theme()
+
+    def afficher_aide(self):
+        messagebox.showinfo("Aide et limites", LIMITES.format(log=os.path.join(DOSSIER_DONNEES, "pdfstudio.log")))
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
@@ -173,6 +211,8 @@ class PDFStudio(ctk.CTk):
             if autre != nom:
                 page.grid_forget()
         self.pages[nom].grid(row=1, column=0, sticky="nsew")
+        self.page_active = nom
+        self.apercu.redessiner()
         for autre, bouton in self.boutons_nav.items():
             choisi = autre == nom
             bouton.configure(
@@ -243,7 +283,8 @@ class PDFStudio(ctk.CTk):
                     popup.after(0, self._quitter_sans_sauver)
                 except Exception as exc:  # noqa: BLE001 - on affiche l'erreur et on propose de réessayer
                     logging.exception("Échec de la mise à jour")
-                    popup.after(0, lambda: self._echec_mise_a_jour(popup, etat, bouton_maj, bouton_quitter, exc))
+                    # exc=exc : Python efface `exc` à la sortie du except, avant que le lambda ne s'exécute.
+                    popup.after(0, lambda exc=exc: self._echec_mise_a_jour(popup, etat, bouton_maj, bouton_quitter, exc))
 
             threading.Thread(target=travail, daemon=True).start()
 
@@ -289,10 +330,40 @@ class PDFStudio(ctk.CTk):
             initialdir=self.dernier_dossier, filetypes=[("PDF", "*.pdf")]
         )
         if chemin:
-            self.chemin_pdf = chemin
             self._memoriser_dossier(chemin)
-            self.label_fichier.configure(text=os.path.basename(chemin))
-            self.statut(f"Fichier ouvert : {os.path.basename(chemin)}")
+            self.charger_fichier(chemin)
+
+    def demander_mot_de_passe(self, chemin: str) -> bool:
+        """Demande le mot de passe d'un PDF chiffré et le mémorise. Faux si annulé."""
+        mot_de_passe = simpledialog.askstring(
+            "PDF protégé", f"« {os.path.basename(chemin)} » est protégé.\nMot de passe :",
+            show="•", parent=self)
+        if not mot_de_passe:
+            return False
+        core.remember_password(chemin, mot_de_passe)
+        return True
+
+    def charger_fichier(self, chemin: str):
+        """Ouvre un PDF dans l'aperçu ; demande le mot de passe s'il est chiffré."""
+        while True:
+            try:
+                doc = core.open_pdf(chemin)
+                break
+            except core.PasswordRequired:
+                if not self.demander_mot_de_passe(chemin):
+                    self.statut("Ouverture annulée : mot de passe requis.")
+                    return
+                # Un mot de passe faux relève PasswordRequired : on redemande.
+            except Exception:  # noqa: BLE001 - fichier illisible, on le dit sans planter
+                logging.exception("Ouverture impossible : %s", chemin)
+                messagebox.showerror("PDF Studio", f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
+                return
+        self.chemin_pdf = chemin
+        self.label_fichier.configure(text=os.path.basename(chemin))
+        self.selection = None
+        self.resultats_recherche = {}
+        self.apercu.charger(doc)
+        self.statut(f"Fichier ouvert : {os.path.basename(chemin)} ({doc.page_count} page(s))")
 
     def statut(self, texte: str):
         self.etat.configure(text=texte)
@@ -311,11 +382,16 @@ class PDFStudio(ctk.CTk):
             try:
                 resultat = travail(progress)
                 self.after(0, lambda: self._fin_ok(resultat, fin))
-            except core.PasswordRequired:
-                self.after(0, lambda: self.statut("Ce PDF est protégé par un mot de passe."))
+            # Les messages sont lus ICI : Python efface `exc` à la sortie du except,
+            # avant que les lambdas ne s'exécutent dans le thread de l'interface.
+            except core.PasswordRequired as exc:
+                # Demande le mot de passe dans le thread de l'interface, puis relance.
+                chemin = exc.path
+                self.after(0, lambda: self._relancer_avec_mot_de_passe(chemin, travail, fin))
             except core.PdfStudioError as exc:
-                self.after(0, lambda: messagebox.showwarning("PDF Studio", str(exc)))
-                self.after(0, lambda: self.statut(str(exc)))
+                message = str(exc)
+                self.after(0, lambda: messagebox.showwarning("PDF Studio", message))
+                self.after(0, lambda: self.statut(message))
             except Exception:  # noqa: BLE001 - tout doit finir dans le journal
                 logging.error(traceback.format_exc())
                 self.after(0, lambda: messagebox.showerror(
@@ -329,10 +405,18 @@ class PDFStudio(ctk.CTk):
         self.barre.grid()  # visible uniquement pendant un traitement
         threading.Thread(target=cible, daemon=True).start()
 
+    def _relancer_avec_mot_de_passe(self, chemin: str, travail, fin):
+        if self.demander_mot_de_passe(chemin):
+            self.lancer(travail, fin)
+        else:
+            self.statut("Traitement annulé : mot de passe requis.")
+
     def _fin_travail(self):
         self.travaux_en_cours -= 1
         if not self.travaux_en_cours:
             self.barre.grid_remove()
+            # Les superpositions sont sautées pendant un traitement : on les rattrape.
+            self.apercu.redessiner()
 
     def _fin_ok(self, resultat, fin):
         self.statut("Terminé.")
@@ -356,31 +440,91 @@ class PDFStudio(ctk.CTk):
     def _continuer_sur_resultat(self, var: ctk.BooleanVar, chemin: str):
         """Case « Continuer sur le fichier résultat » : le résultat devient le fichier courant."""
         if var.get():
-            self.chemin_pdf = chemin
-            self.label_fichier.configure(text=os.path.basename(chemin))
+            page = self.apercu.index
+            self.charger_fichier(chemin)
+            self.apercu.aller(page)  # reste sur la page où l'on travaillait
+
+    # ----------------------------------------------- éléments de formulaire
+
+    def _section(self, parent, titre: str):
+        """Petit titre de section dans un formulaire."""
+        ctk.CTkLabel(parent, text=titre.upper(), font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=("gray45", "gray55"), anchor="w").pack(fill="x", padx=12, pady=(14, 4))
+
+    def _aide(self, parent, texte: str):
+        """Texte explicatif discret, sur plusieurs lignes."""
+        ctk.CTkLabel(parent, text=texte, wraplength=340, justify="left", anchor="w",
+                     text_color=("gray35", "gray65")).pack(fill="x", padx=12, pady=(0, 6))
+
+    def _champ(self, parent, libelle: str, defaut: str) -> ctk.CTkEntry:
+        ligne = ctk.CTkFrame(parent, fg_color="transparent")
+        ligne.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(ligne, text=libelle, width=130, anchor="w").pack(side="left")
+        entree = ctk.CTkEntry(ligne)
+        entree.insert(0, defaut)
+        entree.pack(side="left", fill="x", expand=True)
+        return entree
+
+    def _remplir(self, entree: ctk.CTkEntry, valeur):
+        entree.delete(0, "end")
+        entree.insert(0, valeur if isinstance(valeur, str) else f"{valeur:.1f}".rstrip("0").rstrip("."))
+
+    def _case_continuer(self, parent) -> ctk.BooleanVar:
+        var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(parent, text="Continuer sur le fichier résultat", variable=var).pack(anchor="w", padx=12, pady=(10, 2))
+        return var
+
+    def _bouton_action(self, parent, texte: str, commande):
+        ctk.CTkButton(parent, text=texte, height=36, font=ctk.CTkFont(size=14, weight="bold"),
+                      command=commande).pack(fill="x", padx=12, pady=(10, 12))
+
+    def _exiger_pdf(self) -> bool:
+        if not self.chemin_pdf:
+            messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF (bouton en haut à droite).")
+            return False
+        return True
 
     # ---------------------------------------------------------- Fusion
 
     def _construire_fusion(self):
         onglet = self.pages["Fusion"]
         self.liste_fusion: list[str] = []
-        self.zone_fusion = ctk.CTkTextbox(onglet, height=300)
-        self.zone_fusion.pack(fill="both", expand=True, padx=8, pady=8)
-        self.zone_fusion.configure(state="disabled")
-        cadre = ctk.CTkFrame(onglet, fg_color="transparent")
-        cadre.pack(fill="x", padx=8)
-        ctk.CTkButton(cadre, text="Ajouter des PDF…", command=self.ajouter_fusion).pack(side="left", padx=4)
-        ctk.CTkButton(cadre, text="Monter", width=80, command=lambda: self.deplacer_fusion(-1)).pack(side="left", padx=4)
-        ctk.CTkButton(cadre, text="Descendre", width=80, command=lambda: self.deplacer_fusion(1)).pack(side="left", padx=4)
-        ctk.CTkButton(cadre, text="Vider", width=80, command=self.vider_fusion).pack(side="left", padx=4)
-        ctk.CTkButton(cadre, text="Fusionner", command=self.lancer_fusion).pack(side="right", padx=4)
+        self.selection_fusion: int | None = None
+        self._section(onglet, "Fichiers à fusionner")
+        self._aide(onglet, "Cliquez sur un fichier pour le sélectionner, puis changez sa place. "
+                           "Chaque fichier devient un signet ; ses signets d'origine sont conservés.")
+        self.cadre_fusion = ctk.CTkFrame(onglet)
+        self.cadre_fusion.pack(fill="x", padx=12, pady=4)
+        boutons = ctk.CTkFrame(onglet, fg_color="transparent")
+        boutons.pack(fill="x", padx=12, pady=4)
+        ctk.CTkButton(boutons, text="Ajouter…", width=80, command=self.ajouter_fusion).pack(side="left")
+        for texte, commande in [("▲", lambda: self.deplacer_fusion(-1)), ("▼", lambda: self.deplacer_fusion(1)),
+                                ("Retirer", self.retirer_fusion), ("Vider", self.vider_fusion)]:
+            ctk.CTkButton(boutons, text=texte, width=36 if len(texte) == 1 else 70, fg_color="gray50",
+                          hover_color="gray40", command=commande).pack(side="left", padx=(6, 0))
+        self._bouton_action(onglet, "Fusionner…", self.lancer_fusion)
+        self._rafraichir_fusion()
 
     def _rafraichir_fusion(self):
-        self.zone_fusion.configure(state="normal")
-        self.zone_fusion.delete("1.0", "end")
-        for i, p in enumerate(self.liste_fusion, 1):
-            self.zone_fusion.insert("end", f"{i}. {os.path.basename(p)}\n")
-        self.zone_fusion.configure(state="disabled")
+        for enfant in self.cadre_fusion.winfo_children():
+            enfant.destroy()
+        if not self.liste_fusion:
+            ctk.CTkLabel(self.cadre_fusion, text="Aucun fichier. Cliquez sur « Ajouter… ».",
+                         text_color=("gray40", "gray60")).pack(padx=10, pady=14)
+            return
+        for i, chemin in enumerate(self.liste_fusion):
+            choisi = i == self.selection_fusion
+            ctk.CTkButton(
+                self.cadre_fusion, text=f"{i + 1}.  {os.path.basename(chemin)}", anchor="w", height=30,
+                fg_color=("#3B8ED0", "#1F6AA5") if choisi else "transparent",
+                text_color=("white", "white") if choisi else ("gray10", "gray90"),
+                hover_color=("gray75", "gray30"),
+                command=lambda i=i: self._choisir_fusion(i),
+            ).pack(fill="x", padx=4, pady=1)
+
+    def _choisir_fusion(self, index: int):
+        self.selection_fusion = index
+        self._rafraichir_fusion()
 
     def ajouter_fusion(self):
         chemins = filedialog.askopenfilenames(initialdir=self.dernier_dossier, filetypes=[("PDF", "*.pdf")])
@@ -390,20 +534,31 @@ class PDFStudio(ctk.CTk):
             self._rafraichir_fusion()
 
     def deplacer_fusion(self, sens: int):
-        # Ici la liste sert de modèle : on déplace le DERNIER fichier ajouté, faute de sélection.
-        if len(self.liste_fusion) > 1:
-            i = len(self.liste_fusion) - 1 if sens < 0 else 0
-            j = i + sens
-            if 0 <= j < len(self.liste_fusion):
-                self.liste_fusion[i], self.liste_fusion[j] = self.liste_fusion[j], self.liste_fusion[i]
+        """Monte ou descend le fichier SÉLECTIONNÉ."""
+        i = self.selection_fusion
+        if i is None:
+            return self.statut("Sélectionnez d'abord un fichier dans la liste.")
+        j = i + sens
+        if 0 <= j < len(self.liste_fusion):
+            self.liste_fusion[i], self.liste_fusion[j] = self.liste_fusion[j], self.liste_fusion[i]
+            self.selection_fusion = j
+            self._rafraichir_fusion()
+
+    def retirer_fusion(self):
+        if self.selection_fusion is not None:
+            del self.liste_fusion[self.selection_fusion]
+            self.selection_fusion = None
             self._rafraichir_fusion()
 
     def vider_fusion(self):
         self.liste_fusion.clear()
+        self.selection_fusion = None
         self._rafraichir_fusion()
 
     def lancer_fusion(self):
         fichiers = list(self.liste_fusion)
+        if len(fichiers) < 2:
+            return messagebox.showinfo("PDF Studio", "Ajoutez au moins deux PDF à fusionner.")
         sortie = filedialog.asksaveasfilename(initialdir=self.dernier_dossier, initialfile="fusion.pdf",
                                               defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
         if not sortie:
@@ -416,87 +571,132 @@ class PDFStudio(ctk.CTk):
 
     def _construire_division(self):
         onglet = self.pages["Division"]
+        self._section(onglet, "Mode de découpe")
         self.mode_division = ctk.StringVar(value="page")
         for valeur, texte in [("page", "Une page par fichier"),
                               ("n", "Toutes les N pages"),
-                              ("plages", "Par plages (ex. 1-3, 5, 8-)")]:
+                              ("plages", "Par plages (une plage = un fichier)")]:
             ctk.CTkRadioButton(onglet, text=texte, variable=self.mode_division, value=valeur).pack(anchor="w", padx=12, pady=4)
-        self.entree_n = ctk.CTkEntry(onglet, placeholder_text="N (pour le mode « toutes les N pages »)")
-        self.entree_n.pack(fill="x", padx=12, pady=4)
-        self.entree_plages = ctk.CTkEntry(onglet, placeholder_text="Plages, ex. 1-3, 5, 8-")
-        self.entree_plages.pack(fill="x", padx=12, pady=4)
-        ctk.CTkButton(onglet, text="Diviser", command=self.lancer_division).pack(padx=12, pady=12, anchor="e")
+        self._section(onglet, "Paramètres")
+        self.entree_n = self._champ(onglet, "N pages", "2")
+        self.entree_plages = self._champ(onglet, "Plages", "")
+        self.entree_plages.configure(placeholder_text="ex. 1-3, 5, 8-")
+        self._aide(onglet, "Les fichiers sont créés dans le dossier que vous choisirez.")
+        self._bouton_action(onglet, "Diviser…", self.lancer_division)
 
     def lancer_division(self):
-        if not self.chemin_pdf:
-            return messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF.")
-        dossier = filedialog.askdirectory(initialdir=self.dernier_dossier)
-        if not dossier:
+        if not self._exiger_pdf():
             return
         source = self.chemin_pdf
         mode = self.mode_division.get()
         n = self.entree_n.get().strip()
         plages = self.entree_plages.get().strip()
+        if mode == "n" and not n.isdigit():
+            return messagebox.showwarning("PDF Studio", "Indiquez un nombre entier pour N.")
+        if mode == "plages" and not plages:
+            return messagebox.showwarning("PDF Studio", "Indiquez les plages, par exemple « 1-3, 5, 8- ».")
+        dossier = filedialog.askdirectory(initialdir=self.dernier_dossier)
+        if not dossier:
+            return
 
         def travail(p):
             if mode == "page":
                 return core.split_by_page(source, dossier, p)
             if mode == "n":
-                if not n.isdigit():
-                    raise core.PdfStudioError("Indiquez un nombre entier pour N.")
                 return core.split_every_n(source, dossier, int(n), p)
             return core.split_by_ranges(source, dossier, plages, p)
 
         self.statut("Division en cours…")
-        self.lancer(travail, fin=lambda fichiers: self.statut(f"{len(fichiers)} fichier(s) créé(s)."))
+        self.lancer(travail, fin=lambda fichiers: self.statut(f"{len(fichiers)} fichier(s) créé(s) dans {dossier}."))
 
     # ---------------------------------------------- Signature / Tampon
 
     def _construire_tampon(self):
         onglet = self.pages["Signature / Tampon"]
         self.image_tampon: str | None = None
-        ctk.CTkButton(onglet, text="Choisir l'image (PNG/JPG)…", command=self.choisir_tampon).pack(anchor="w", padx=12, pady=6)
-        self.label_tampon = ctk.CTkLabel(onglet, text="Aucune image")
-        self.label_tampon.pack(anchor="w", padx=12)
+        self.ratio_tampon = 0.5
+        self._cache_tampon = (None, None)  # (clé, PhotoImage) de l'image en surimpression
+        self._section(onglet, "Image")
+        ligne = ctk.CTkFrame(onglet, fg_color="transparent")
+        ligne.pack(fill="x", padx=12, pady=2)
+        ctk.CTkButton(ligne, text="Choisir…", width=90, command=self.choisir_tampon).pack(side="left")
+        self.label_tampon = ctk.CTkLabel(ligne, text="Aucune image (PNG ou JPG)", anchor="w")
+        self.label_tampon.pack(side="left", padx=8, fill="x", expand=True)
+        self.blanc_transparent = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(onglet, text="Fond blanc transparent (signature scannée)", variable=self.blanc_transparent).pack(anchor="w", padx=12, pady=4)
+
+        self._section(onglet, "Position sur la page")
+        self._aide(onglet, "Cliquez sur l'aperçu pour poser l'image, puis faites-la glisser. "
+                           "Les valeurs sont en points (1/72 de pouce).")
         self.entree_x = self._champ(onglet, "X (pt)", "72")
         self.entree_y = self._champ(onglet, "Y (pt)", "72")
-        self.entree_l = self._champ(onglet, "Largeur (pt)", "120")
+        self.entree_l = self._champ(onglet, "Largeur (pt)", "150")
+        for entree in (self.entree_x, self.entree_y, self.entree_l):
+            entree.bind("<KeyRelease>", lambda _e: self.apercu.redessiner())
         self.entree_op = self._champ(onglet, "Opacité (%)", "100")
         self.rotation_tampon = ctk.StringVar(value="0")
         ligne = ctk.CTkFrame(onglet, fg_color="transparent")
         ligne.pack(fill="x", padx=12, pady=2)
-        ctk.CTkLabel(ligne, text="Rotation (°)", width=140, anchor="w").pack(side="left")
-        ctk.CTkOptionMenu(ligne, values=["0", "90", "180", "270"], width=100,
-                          variable=self.rotation_tampon).pack(side="left")
-        self.blanc_transparent = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(onglet, text="Fond blanc transparent (signature scannée)", variable=self.blanc_transparent).pack(anchor="w", padx=12, pady=4)
-        self.portee_tampon = ctk.StringVar(value="page")
-        ctk.CTkRadioButton(onglet, text="Page affichée (1)", variable=self.portee_tampon, value="page").pack(anchor="w", padx=12)
-        ctk.CTkRadioButton(onglet, text="Toutes les pages", variable=self.portee_tampon, value="toutes").pack(anchor="w", padx=12)
-        self.entree_plage_tampon = self._champ(onglet, "Ou plage de pages", "")
-        self.continuer_tampon = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Continuer sur le fichier résultat", variable=self.continuer_tampon).pack(anchor="w", padx=12, pady=4)
-        ctk.CTkButton(onglet, text="Appliquer…", command=self.lancer_tampon).pack(anchor="e", padx=12, pady=8)
+        ctk.CTkLabel(ligne, text="Rotation (°)", width=130, anchor="w").pack(side="left")
+        ctk.CTkSegmentedButton(ligne, values=["0", "90", "180", "270"], variable=self.rotation_tampon,
+                               command=lambda _v: self.apercu.redessiner()).pack(side="left", fill="x", expand=True)
 
-    def _champ(self, parent, libelle: str, defaut: str) -> ctk.CTkEntry:
-        ligne = ctk.CTkFrame(parent, fg_color="transparent")
-        ligne.pack(fill="x", padx=12, pady=2)
-        ctk.CTkLabel(ligne, text=libelle, width=140, anchor="w").pack(side="left")
-        entree = ctk.CTkEntry(ligne)
-        entree.insert(0, defaut)
-        entree.pack(side="left", fill="x", expand=True)
-        return entree
+        self._section(onglet, "Pages")
+        self.portee_tampon = ctk.StringVar(value="page")
+        ctk.CTkRadioButton(onglet, text="Page affichée dans l'aperçu", variable=self.portee_tampon, value="page").pack(anchor="w", padx=12, pady=2)
+        ctk.CTkRadioButton(onglet, text="Toutes les pages", variable=self.portee_tampon, value="toutes").pack(anchor="w", padx=12, pady=2)
+        ctk.CTkRadioButton(onglet, text="Plage :", variable=self.portee_tampon, value="plage").pack(anchor="w", padx=12, pady=2)
+        self.entree_plage_tampon = self._champ(onglet, "", "")
+        self.entree_plage_tampon.configure(placeholder_text="ex. 1, 3-5")
+        self.continuer_tampon = self._case_continuer(onglet)
+        self._bouton_action(onglet, "Appliquer…", self.lancer_tampon)
 
     def choisir_tampon(self):
         chemin = filedialog.askopenfilename(initialdir=self.dernier_dossier,
                                             filetypes=[("Images", "*.png *.jpg *.jpeg")])
-        if chemin:
-            self.image_tampon = chemin
-            self.label_tampon.configure(text=os.path.basename(chemin))
+        if not chemin:
+            return
+        try:
+            with Image.open(chemin) as im:
+                self.ratio_tampon = im.height / im.width
+        except OSError:
+            return messagebox.showerror("PDF Studio", "Image illisible.")
+        self.image_tampon = chemin
+        self.label_tampon.configure(text=os.path.basename(chemin))
+        self.apercu.redessiner()
+
+    def _rect_tampon(self) -> fitz.Rect | None:
+        """Rectangle du tampon dans le repère affiché, d'après les champs."""
+        try:
+            x, y, largeur = (float(e.get()) for e in (self.entree_x, self.entree_y, self.entree_l))
+        except ValueError:
+            return None
+        if self.rotation_tampon.get() in ("90", "270"):
+            return fitz.Rect(x, y, x + largeur * self.ratio_tampon, y + largeur)
+        return fitz.Rect(x, y, x + largeur, y + largeur * self.ratio_tampon)
+
+    def _dessiner_tampon(self, apercu: Apercu):
+        rect = self._rect_tampon()
+        if not self.image_tampon or rect is None:
+            return
+        x0, y0, x1, y1 = apercu.rect_canevas(rect)
+        taille = (max(1, int(x1 - x0)), max(1, int(y1 - y0)))
+        cle = (self.image_tampon, taille, self.rotation_tampon.get(), self.blanc_transparent.get())
+        if self._cache_tampon[0] != cle:
+            image = Image.open(self.image_tampon).convert("RGBA")
+            if self.blanc_transparent.get():
+                image = Image.open(io.BytesIO(core._prepare_stamp_image(
+                    self.image_tampon, core.StampOptions(0, 0, 1, white_transparent=True))))
+            image = image.rotate(-int(self.rotation_tampon.get()), expand=True).resize(taille)
+            self._cache_tampon = (cle, ImageTk.PhotoImage(image))
+        apercu.canevas.create_image(x0, y0, image=self._cache_tampon[1], anchor="nw", tags="superposition")
+        apercu.canevas.create_rectangle(x0, y0, x1, y1, outline="#1F6AA5", width=2, dash=(4, 2), tags="superposition")
 
     def lancer_tampon(self):
-        if not (self.chemin_pdf and self.image_tampon):
-            return messagebox.showinfo("PDF Studio", "Ouvrez un PDF et choisissez une image.")
+        if not self._exiger_pdf():
+            return
+        if not self.image_tampon:
+            return messagebox.showinfo("PDF Studio", "Choisissez d'abord une image.")
         try:
             opts = core.StampOptions(
                 x=float(self.entree_x.get()),
@@ -512,6 +712,9 @@ class PDFStudio(ctk.CTk):
         image = self.image_tampon
         portee = self.portee_tampon.get()
         plage = self.entree_plage_tampon.get().strip()
+        page_affichee = self.apercu.index
+        if portee == "plage" and not plage:
+            return messagebox.showwarning("PDF Studio", "Indiquez la plage de pages.")
         sortie = self.enregistrer_sous("signe")
         if not sortie:
             return
@@ -519,21 +722,24 @@ class PDFStudio(ctk.CTk):
         def travail(p):
             doc = core.open_pdf(source)
             try:
-                if plage:
+                if portee == "plage":
                     pages = core.parse_page_ranges(plage, doc.page_count)
                 elif portee == "toutes":
                     pages = list(range(doc.page_count))
                 else:
-                    pages = [0]
+                    pages = [page_affichee]
                 core.add_stamp(doc, image, pages, opts, p)
                 core.save_atomic(doc, sortie)
+                return len(pages)
             finally:
                 doc.close()
 
         self.statut("Application du tampon…")
-        self.lancer(travail, fin=lambda _: self._apres_sauvegarde(sortie, self.continuer_tampon))
+        self.lancer(travail, fin=lambda n: self._apres_sauvegarde(sortie, self.continuer_tampon,
+                                                                   f"Tampon posé sur {n} page(s)."))
 
-    def _apres_sauvegarde(self, sortie: str, continuer: ctk.BooleanVar):
+    def _apres_sauvegarde(self, sortie: str, continuer: ctk.BooleanVar, message: str = "Terminé."):
+        self.statut(message)
         self._continuer_sur_resultat(continuer, sortie)
         self.proposer_ouverture(sortie)
 
@@ -541,49 +747,73 @@ class PDFStudio(ctk.CTk):
 
     def _construire_remplacement(self):
         onglet = self.pages["Remplacer du texte"]
-        self.entree_ancien = self._champ(onglet, "Texte à remplacer", "")
-        self.entree_nouveau = self._champ(onglet, "Nouveau texte (vide = effacer)", "")
-        self.entree_plage_rempl = self._champ(onglet, "Pages (vide = toutes)", "")
+        self.resultats_recherche: dict[int, list[fitz.Rect]] = {}
+        self._section(onglet, "Texte")
+        self.entree_ancien = self._champ(onglet, "Rechercher", "")
+        self.entree_nouveau = self._champ(onglet, "Remplacer par", "")
+        self.entree_nouveau.configure(placeholder_text="vide = effacer")
+        self.entree_plage_rempl = self._champ(onglet, "Pages", "")
+        self.entree_plage_rempl.configure(placeholder_text="vide = toutes")
         self.casse = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Respecter la casse", variable=self.casse).pack(anchor="w", padx=12, pady=2)
+        ctk.CTkCheckBox(onglet, text="Respecter la casse", variable=self.casse).pack(anchor="w", padx=12, pady=(8, 2))
         self.reduire = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Réduire la taille si le nouveau texte est plus long", variable=self.reduire).pack(anchor="w", padx=12, pady=2)
-        self.continuer_rempl = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Continuer sur le fichier résultat", variable=self.continuer_rempl).pack(anchor="w", padx=12, pady=2)
-        cadre = ctk.CTkFrame(onglet, fg_color="transparent")
-        cadre.pack(fill="x", padx=12, pady=8)
-        ctk.CTkButton(cadre, text="Rechercher (aperçu)", command=self.rechercher_texte).pack(side="left", padx=4)
-        ctk.CTkButton(cadre, text="Remplacer…", command=self.lancer_remplacement).pack(side="right", padx=4)
-        self.zone_resultats = ctk.CTkTextbox(onglet, height=160)
-        self.zone_resultats.pack(fill="both", expand=True, padx=12, pady=6)
+        ctk.CTkCheckBox(onglet, text="Réduire la taille si le texte est plus long", variable=self.reduire).pack(anchor="w", padx=12, pady=2)
+        ctk.CTkButton(onglet, text="Rechercher (aperçu)", fg_color="gray50", hover_color="gray40",
+                      command=self.rechercher_texte).pack(fill="x", padx=12, pady=(10, 4))
+        self.entree_ancien.bind("<Return>", lambda _e: self.rechercher_texte())
+        self.cadre_resultats = ctk.CTkFrame(onglet, fg_color="transparent")
+        self.cadre_resultats.pack(fill="x", padx=12)
+        self.continuer_rempl = self._case_continuer(onglet)
+        self._bouton_action(onglet, "Remplacer…", self.lancer_remplacement)
 
     def rechercher_texte(self):
-        if not self.chemin_pdf:
-            return messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF.")
+        if not self._exiger_pdf():
+            return
         needle = self.entree_ancien.get()
+        if not needle:
+            return self.statut("Saisissez le texte à rechercher.")
         casse = self.casse.get()
         source = self.chemin_pdf
 
-        def travail(_p):
+        def travail(p):
             doc = core.open_pdf(source)
             try:
-                return core.find_text(doc, needle, casse)
+                return core.find_text_rects(doc, needle, casse, p)
             finally:
                 doc.close()
 
-        def fin(resultat):
-            self.zone_resultats.delete("1.0", "end")
-            if not resultat:
-                self.zone_resultats.insert("end", "Aucune occurrence.\nSi c'est un scan, passez par l'onglet OCR.\n")
-            for page, n in sorted(resultat.items()):
-                self.zone_resultats.insert("end", f"Page {page + 1} : {n} occurrence(s)\n")
+        self.statut("Recherche…")
+        self.lancer(travail, fin=self._afficher_resultats)
 
-        self.lancer(travail, fin=fin)
+    def _afficher_resultats(self, resultats: dict[int, list[fitz.Rect]]):
+        self.resultats_recherche = resultats
+        for enfant in self.cadre_resultats.winfo_children():
+            enfant.destroy()
+        if not resultats:
+            self._aide(self.cadre_resultats, "Aucune occurrence. Si ce PDF est un scan, le texte n'est "
+                                             "qu'une image : passez d'abord par « OCR (scans) ».")
+            self.statut("Aucune occurrence.")
+        else:
+            total = sum(len(r) for r in resultats.values())
+            self.statut(f"{total} occurrence(s) sur {len(resultats)} page(s).")
+            pages = sorted(resultats)
+            for page in pages[:30]:
+                ctk.CTkButton(self.cadre_resultats, text=f"Page {page + 1} — {len(resultats[page])} occurrence(s)",
+                              anchor="w", height=26, fg_color="transparent", text_color=("gray10", "gray90"),
+                              hover_color=("gray75", "gray30"),
+                              command=lambda page=page: self.apercu.aller(page)).pack(fill="x")
+            if len(pages) > 30:
+                self._aide(self.cadre_resultats, f"… et {len(pages) - 30} autre(s) page(s).")
+            if self.apercu.index not in resultats:
+                self.apercu.aller(pages[0])
+        self.apercu.redessiner()
 
     def lancer_remplacement(self):
-        if not self.chemin_pdf:
-            return messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF.")
+        if not self._exiger_pdf():
+            return
         ancien = self.entree_ancien.get()
+        if not ancien:
+            return messagebox.showinfo("PDF Studio", "Saisissez le texte à remplacer.")
         nouveau = self.entree_nouveau.get()
         casse = self.casse.get()
         reduire = self.reduire.get()
@@ -607,33 +837,64 @@ class PDFStudio(ctk.CTk):
         self.lancer(travail, fin=lambda n: self._fin_remplacement(n, sortie))
 
     def _fin_remplacement(self, n: int, sortie: str):
-        self.statut(f"{n} remplacement(s).")
-        self._continuer_sur_resultat(self.continuer_rempl, sortie)
-        self.proposer_ouverture(sortie)
+        self.resultats_recherche = {}
+        if n == 0:
+            self.statut("Aucune occurrence remplacée.")
+            return messagebox.showinfo("PDF Studio", "Aucune occurrence trouvée : le fichier créé est identique.\n"
+                                                     "Si c'est un scan, passez d'abord par « OCR (scans) ».")
+        self._apres_sauvegarde(sortie, self.continuer_rempl, f"{n} remplacement(s).")
 
     # ----------------------------------------------- Déplacer du texte
 
     def _construire_deplacement(self):
         onglet = self.pages["Déplacer du texte"]
-        ctk.CTkLabel(onglet, text="Zone à déplacer (points, repère affiché) : page, x0, y0, x1, y1").pack(anchor="w", padx=12, pady=4)
-        self.entree_page_dep = self._champ(onglet, "Page", "1")
-        self.entree_zone = self._champ(onglet, "Zone x0,y0,x1,y1", "0,0,300,100")
-        self.entree_dx = self._champ(onglet, "Décalage dX (pt)", "0")
-        self.entree_dy = self._champ(onglet, "Décalage dY (pt)", "0")
-        self.continuer_dep = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Continuer sur le fichier résultat", variable=self.continuer_dep).pack(anchor="w", padx=12, pady=4)
-        ctk.CTkButton(onglet, text="Déplacer…", command=self.lancer_deplacement).pack(anchor="e", padx=12, pady=8)
+        self.selection: fitz.Rect | None = None
+        self._section(onglet, "Sélection")
+        self._aide(onglet, "Dans l'aperçu : cliquez sur un bloc encadré ou tracez un rectangle, "
+                           "puis faites glisser la sélection vers sa nouvelle place.")
+        self.entree_zone = self._champ(onglet, "Zone x0,y0,x1,y1", "")
+        self._section(onglet, "Décalage")
+        self.entree_dx = self._champ(onglet, "dX (pt)", "0")
+        self.entree_dy = self._champ(onglet, "dY (pt)", "0")
+        for entree in (self.entree_zone, self.entree_dx, self.entree_dy):
+            entree.bind("<KeyRelease>", lambda _e: self._lire_zone_saisie())
+        self.continuer_dep = self._case_continuer(onglet)
+        self._bouton_action(onglet, "Déplacer…", self.lancer_deplacement)
+
+    def _lire_zone_saisie(self):
+        """Une zone tapée à la main remplace la sélection faite à la souris."""
+        try:
+            x0, y0, x1, y1 = (float(v) for v in self.entree_zone.get().split(","))
+            self.selection = fitz.Rect(x0, y0, x1, y1)
+        except ValueError:
+            pass
+        self.apercu.redessiner()
+
+    def _decalage(self) -> tuple[float, float]:
+        try:
+            return float(self.entree_dx.get()), float(self.entree_dy.get())
+        except ValueError:
+            return 0.0, 0.0
+
+    def _maj_champs_deplacement(self, dx: float = 0.0, dy: float = 0.0):
+        if self.selection is not None:
+            r = self.selection
+            self._remplir(self.entree_zone, f"{r.x0:.0f},{r.y0:.0f},{r.x1:.0f},{r.y1:.0f}")
+        else:
+            self._remplir(self.entree_zone, "")
+        self._remplir(self.entree_dx, dx)
+        self._remplir(self.entree_dy, dy)
 
     def lancer_deplacement(self):
-        if not self.chemin_pdf:
-            return messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF.")
-        try:
-            page = int(self.entree_page_dep.get()) - 1
-            x0, y0, x1, y1 = (float(v) for v in self.entree_zone.get().split(","))
-            dx = float(self.entree_dx.get())
-            dy = float(self.entree_dy.get())
-        except ValueError:
-            return messagebox.showwarning("PDF Studio", "Vérifiez la page, la zone et les décalages.")
+        if not self._exiger_pdf():
+            return
+        if self.selection is None:
+            return messagebox.showinfo("PDF Studio", "Sélectionnez d'abord un bloc de texte dans l'aperçu.")
+        zone = fitz.Rect(self.selection)
+        dx, dy = self._decalage()
+        if dx == 0 and dy == 0:
+            return messagebox.showinfo("PDF Studio", "Faites glisser la sélection ou indiquez un décalage.")
+        page = self.apercu.index
         source = self.chemin_pdf
         sortie = self.enregistrer_sous("deplace")
         if not sortie:
@@ -642,47 +903,74 @@ class PDFStudio(ctk.CTk):
         def travail(_p):
             doc = core.open_pdf(source)
             try:
-                if not 0 <= page < doc.page_count:
-                    raise core.PdfStudioError("Numéro de page hors du document.")
-                n = core.move_text_block(doc, page, fitz.Rect(x0, y0, x1, y1), dx, dy)
-                core.save_atomic(doc, sortie)
+                n = core.move_text_block(doc, page, zone, dx, dy)
+                if n:
+                    core.save_atomic(doc, sortie)
                 return n
             finally:
                 doc.close()
 
         self.statut("Déplacement en cours…")
-        self.lancer(travail, fin=lambda n: self._apres_sauvegarde_dep(n, sortie))
+        self.lancer(travail, fin=lambda n: self._fin_deplacement(n, sortie))
 
-    def _apres_sauvegarde_dep(self, n: int, sortie: str):
-        self.statut(f"{n} segment(s) déplacé(s).")
-        self._continuer_sur_resultat(self.continuer_dep, sortie)
-        self.proposer_ouverture(sortie)
+    def _fin_deplacement(self, n: int, sortie: str):
+        if n == 0:
+            self.statut("Aucun texte dans la zone sélectionnée.")
+            return messagebox.showinfo("PDF Studio", "La zone sélectionnée ne contient pas de texte lisible "
+                                                     "horizontalement. Rien n'a été enregistré.")
+        self.selection = None
+        self._maj_champs_deplacement()
+        self._apres_sauvegarde(sortie, self.continuer_dep, f"{n} segment(s) déplacé(s).")
 
     # ----------------------------------------------------------- OCR
 
     def _construire_ocr(self):
         onglet = self.pages["OCR (scans)"]
-        self.entree_langue = self._champ(onglet, "Langue (ex. fra, eng)", "fra")
-        self.entree_dpi = self._champ(onglet, "Résolution (200/300/400)", "300")
-        self.entree_pages_ocr = self._champ(onglet, "Pages (vide = toutes)", "")
-        self.entree_tessdata = self._champ(onglet, "Dossier tessdata (optionnel)", "")
+        self._section(onglet, "Langues")
+        langues = ["fra", "eng", "deu", "spa", "ita"]
+        self.langue_ocr = ctk.StringVar(value=self.config_data.get("langue_ocr", "fra"))
+        self.langue2_ocr = ctk.StringVar(value=self.config_data.get("langue2_ocr", "aucune"))
+        for libelle, var, valeurs in [("Langue", self.langue_ocr, langues),
+                                      ("2ᵉ langue", self.langue2_ocr, ["aucune"] + langues)]:
+            ligne = ctk.CTkFrame(onglet, fg_color="transparent")
+            ligne.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(ligne, text=libelle, width=130, anchor="w").pack(side="left")
+            ctk.CTkOptionMenu(ligne, values=valeurs, variable=var).pack(side="left", fill="x", expand=True)
+        self._section(onglet, "Options")
+        self.dpi_ocr = ctk.StringVar(value="300")
+        ligne = ctk.CTkFrame(onglet, fg_color="transparent")
+        ligne.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(ligne, text="Résolution (dpi)", width=130, anchor="w").pack(side="left")
+        ctk.CTkSegmentedButton(ligne, values=["200", "300", "400"], variable=self.dpi_ocr).pack(side="left", fill="x", expand=True)
+        self.entree_pages_ocr = self._champ(onglet, "Pages", "")
+        self.entree_pages_ocr.configure(placeholder_text="vide = toutes")
         self.ignorer_texte = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(onglet, text="Ignorer les pages qui ont déjà du texte", variable=self.ignorer_texte).pack(anchor="w", padx=12, pady=2)
-        self.continuer_ocr = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(onglet, text="Continuer sur le fichier résultat", variable=self.continuer_ocr).pack(anchor="w", padx=12, pady=2)
-        ctk.CTkButton(onglet, text="Lancer l'OCR…", command=self.lancer_ocr).pack(anchor="e", padx=12, pady=8)
+        ctk.CTkCheckBox(onglet, text="Ignorer les pages qui ont déjà du texte", variable=self.ignorer_texte).pack(anchor="w", padx=12, pady=(8, 2))
+        self.encadrer_mots = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(onglet, text="Encadrer les mots reconnus dans l'aperçu", variable=self.encadrer_mots,
+                        command=self.apercu.redessiner).pack(anchor="w", padx=12, pady=2)
+        self._section(onglet, "Fichiers de langue")
+        self.entree_tessdata = self._champ(onglet, "Dossier tessdata", self.config_data.get("tessdata", ""))
+        self.entree_tessdata.configure(placeholder_text="automatique")
+        self.continuer_ocr = self._case_continuer(onglet)
+        self._bouton_action(onglet, "Lancer l'OCR…", self.lancer_ocr)
 
     def lancer_ocr(self):
-        if not self.chemin_pdf:
-            return messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF.")
-        try:
-            dpi = int(self.entree_dpi.get())
-        except ValueError:
-            return messagebox.showwarning("PDF Studio", "La résolution doit être un nombre.")
-        langue = self.entree_langue.get().strip() or "fra"
+        if not self._exiger_pdf():
+            return
+        langue = self.langue_ocr.get()
+        if self.langue2_ocr.get() not in ("aucune", langue):
+            langue += "+" + self.langue2_ocr.get()
+        dpi = int(self.dpi_ocr.get())
         plage = self.entree_pages_ocr.get().strip()
         tessdata = self.entree_tessdata.get().strip() or None
         ignorer = self.ignorer_texte.get()
+        # Préférences mémorisées pour les prochaines fois.
+        self.config_data.update(langue_ocr=self.langue_ocr.get(), langue2_ocr=self.langue2_ocr.get(),
+                                tessdata=tessdata or "")
+        if core.find_tessdata(tessdata) is None:
+            return messagebox.showwarning("PDF Studio", "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
+                                                        "Indiquez le dossier « tessdata » qui les contient.")
         source = self.chemin_pdf
         sortie = self.enregistrer_sous("ocr")
         if not sortie:
@@ -702,9 +990,93 @@ class PDFStudio(ctk.CTk):
         self.lancer(travail, fin=lambda n: self._fin_ocr(n, sortie))
 
     def _fin_ocr(self, n: int, sortie: str):
-        self.statut(f"OCR terminé sur {n} page(s).")
-        self._continuer_sur_resultat(self.continuer_ocr, sortie)
-        self.proposer_ouverture(sortie)
+        if n == 0:
+            self.statut("Aucune page traitée.")
+            return messagebox.showinfo("PDF Studio", "Aucune page à traiter : toutes contiennent déjà du texte.\n"
+                                                     "Décochez « Ignorer les pages qui ont déjà du texte » pour forcer.")
+        self.encadrer_mots.set(True)
+        self._apres_sauvegarde(sortie, self.continuer_ocr, f"OCR terminé sur {n} page(s).")
+
+    # ------------------------------------------- aperçu : dessin et souris
+
+    def _page_changee(self, _index: int):
+        """Changement de page (pas de zoom) : la sélection de texte n'a plus de sens."""
+        self.selection = None
+        self._maj_champs_deplacement()
+
+    def _dessiner_superpositions(self, apercu: Apercu):
+        if self.travaux_en_cours:
+            return  # lire la page pendant un traitement ferait travailler PyMuPDF sur deux threads
+        canevas = apercu.canevas
+        if self.page_active == "Signature / Tampon":
+            self._dessiner_tampon(apercu)
+        elif self.page_active == "Remplacer du texte":
+            for rect in self.resultats_recherche.get(apercu.index, []):
+                canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#E0A800", width=2,
+                                         fill="#FFD43B", stipple="gray25", tags="superposition")
+        elif self.page_active == "Déplacer du texte":
+            for rect in core.text_blocks(apercu.page):
+                canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#8a8a8a", dash=(2, 3),
+                                         tags="superposition")
+            if self.selection is not None:
+                canevas.create_rectangle(*apercu.rect_canevas(self.selection), outline="#1F6AA5", width=2,
+                                         tags="superposition")
+                dx, dy = self._decalage()
+                if dx or dy:
+                    fantome = fitz.Rect(self.selection) + (dx, dy, dx, dy)
+                    canevas.create_rectangle(*apercu.rect_canevas(fantome), outline="#E8590C", width=2,
+                                             dash=(6, 3), tags="superposition")
+        elif self.page_active == "OCR (scans)" and self.encadrer_mots.get():
+            for rect in core.word_rects(apercu.page):
+                canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#2F9E44", tags="superposition")
+
+    def _souris_appui(self, point: fitz.Point):
+        self._geste = None
+        if self.page_active == "Signature / Tampon":
+            if not self.image_tampon:
+                return self.statut("Choisissez d'abord une image.")
+            rect = self._rect_tampon()
+            if rect is None or not rect.contains(point):
+                # Clic hors de l'image : on la centre sur le clic.
+                largeur = float(self.entree_l.get() or 150)
+                rect = self._rect_tampon() or fitz.Rect(0, 0, largeur, largeur * self.ratio_tampon)
+                self._remplir(self.entree_x, max(0, point.x - rect.width / 2))
+                self._remplir(self.entree_y, max(0, point.y - rect.height / 2))
+                rect = self._rect_tampon()
+            self._geste = ("tampon", point - rect.tl)
+            self.apercu.redessiner()
+        elif self.page_active == "Déplacer du texte":
+            dx, dy = self._decalage()
+            if self.selection is not None and (fitz.Rect(self.selection) + (dx, dy, dx, dy)).contains(point):
+                self._geste = ("deplacer", point - fitz.Point(dx, dy))
+            else:
+                self._geste = ("selection", point)
+
+    def _souris_glisse(self, point: fitz.Point):
+        if not self._geste:
+            return
+        nature, valeur = self._geste
+        if nature == "tampon":
+            self._remplir(self.entree_x, max(0, point.x - valeur.x))
+            self._remplir(self.entree_y, max(0, point.y - valeur.y))
+        elif nature == "deplacer":
+            ecart = point - valeur
+            self._maj_champs_deplacement(round(ecart.x), round(ecart.y))
+        elif nature == "selection":
+            self.selection = fitz.Rect(valeur, point)
+            self.selection.normalize()
+            self._maj_champs_deplacement()
+        self.apercu.redessiner()
+
+    def _souris_relache(self, point: fitz.Point):
+        if self._geste and self._geste[0] == "selection" and (self.selection is None or
+                                                              self.selection.width < 3 or self.selection.height < 3):
+            # Simple clic : on sélectionne le bloc de texte situé sous la souris.
+            blocs = [] if self.travaux_en_cours else core.text_blocks(self.apercu.page)
+            self.selection = next((fitz.Rect(b) for b in blocs if b.contains(point)), None)
+            self._maj_champs_deplacement()
+            self.apercu.redessiner()
+        self._geste = None
 
 
 def main() -> None:

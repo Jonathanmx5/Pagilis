@@ -22,16 +22,20 @@ try:
 except ImportError:  # pragma: no cover - repli pour les vieilles versions
     import fitz
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 Progress = Optional[Callable[[int, int], None]]
 
-# Polices système Windows utilisées pour réécrire le texte (gèrent € et œ).
-WINDOWS_FONTS = {
-    (False, False): r"C:\Windows\Fonts\arial.ttf",
-    (True, False): r"C:\Windows\Fonts\arialbd.ttf",
-    (False, True): r"C:\Windows\Fonts\ariali.ttf",
-    (True, True): r"C:\Windows\Fonts\arialbi.ttf",
+# Polices utilisées pour réécrire le texte, par famille puis (gras, italique) :
+# fichier système Windows (gère € et œ) et police PDF standard de repli.
+DOSSIER_POLICES = r"C:\Windows\Fonts"
+POLICES = {
+    "sans": {(False, False): ("arial", "helv"), (True, False): ("arialbd", "hebo"),
+             (False, True): ("ariali", "heit"), (True, True): ("arialbi", "hebi")},
+    "serif": {(False, False): ("times", "tiro"), (True, False): ("timesbd", "tibo"),
+              (False, True): ("timesi", "tiit"), (True, True): ("timesbi", "tibi")},
+    "mono": {(False, False): ("cour", "cour"), (True, False): ("courbd", "cobo"),
+             (False, True): ("couri", "coit"), (True, True): ("courbi", "cobi")},
 }
 
 
@@ -249,18 +253,21 @@ class StampOptions:
 
 
 def _prepare_stamp_image(image_path: str, opts: StampOptions) -> bytes:
-    """Charge l'image, rend le blanc transparent et applique l'opacité."""
+    """Charge l'image, rend le blanc transparent et applique l'opacité.
+
+    Tout passe par des opérations Pillow sur les canaux (pas de boucle Python
+    par pixel) : une signature scannée de plusieurs mégapixels reste instantanée.
+    """
     img = Image.open(image_path).convert("RGBA")
-    pixels = img.load()
-    largeur, hauteur = img.size
-    for y in range(hauteur):
-        for x in range(largeur):
-            r, g, b, a = pixels[x, y]
-            if opts.white_transparent and r > 240 and g > 240 and b > 240:
-                a = 0
-            else:
-                a = int(a * opts.opacity)
-            pixels[x, y] = (r, g, b, a)
+    r, g, b, a = img.split()
+    if opts.white_transparent:
+        # Masque 255 là où le pixel est « blanc » (les 3 canaux > 240), sinon 0.
+        clair = [c.point(lambda v: 255 if v > 240 else 0) for c in (r, g, b)]
+        blanc = ImageChops.multiply(ImageChops.multiply(clair[0], clair[1]), clair[2])
+        a = ImageChops.subtract(a, blanc)
+    if opts.opacity < 1.0:
+        a = a.point(lambda v: int(v * opts.opacity))
+    img.putalpha(a)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -389,14 +396,48 @@ def _find_matches(page: fitz.Page, needle: str, match_case: bool) -> list[fitz.R
     return rects
 
 
-def find_text(doc: fitz.Document, needle: str, match_case: bool = False) -> dict[int, int]:
-    """Retourne {indice de page: nombre d'occurrences} pour l'aperçu."""
+def to_displayed(page: fitz.Page, rect) -> fitz.Rect:
+    """Rectangle du repère non tourné (celui de get_text) -> repère affiché."""
+    r = fitz.Rect(rect) * page.rotation_matrix
+    r.normalize()
+    return r
+
+
+def find_text_rects(
+    doc: fitz.Document, needle: str, match_case: bool = False, progress: Progress = None
+) -> dict[int, list[fitz.Rect]]:
+    """Retourne {indice de page: rectangles des occurrences, repère affiché}.
+
+    Sert au surlignage de l'aperçu ; même recherche que replace_text.
+    """
     resultat = {}
     for i in range(doc.page_count):
-        n = len(_find_matches(doc[i], needle, match_case))
-        if n:
-            resultat[i] = n
+        page = doc[i]
+        rects = [to_displayed(page, r) for r in _find_matches(page, needle, match_case)]
+        if rects:
+            resultat[i] = rects
+        if progress:
+            progress(i + 1, doc.page_count)
     return resultat
+
+
+def find_text(doc: fitz.Document, needle: str, match_case: bool = False) -> dict[int, int]:
+    """Retourne {indice de page: nombre d'occurrences}."""
+    return {i: len(r) for i, r in find_text_rects(doc, needle, match_case).items()}
+
+
+def text_blocks(page: fitz.Page) -> list[fitz.Rect]:
+    """Blocs de texte lisibles horizontalement, repère affiché (à encadrer dans l'aperçu)."""
+    blocs = []
+    for bloc in page.get_text("dict")["blocks"]:
+        if bloc.get("type") == 0 and any(_horizontal_line(l, page) for l in bloc["lines"]):
+            blocs.append(to_displayed(page, bloc["bbox"]))
+    return blocs
+
+
+def word_rects(page: fitz.Page) -> list[fitz.Rect]:
+    """Rectangles de tous les mots de la page, repère affiché (mots reconnus par l'OCR)."""
+    return [to_displayed(page, w[:4]) for w in page.get_text("words")]
 
 
 def _char_style(span: dict) -> tuple:
@@ -433,20 +474,18 @@ def _spans_of_line(line: dict) -> list[TextSpan]:
 
 
 def _font_for(span: TextSpan) -> tuple[Optional[str], Optional[str]]:
-    """Choisit une police : fichier système Windows, sinon police PDF standard.
+    """Choisit la police selon le style d'origine (famille, gras, italique).
 
-    Retourne (fontname, fontfile).
+    Retourne (fontname, fontfile). Le nom est propre à chaque fichier : sur une
+    même page, PyMuPDF réutilise la police déjà insérée sous un nom donné, donc
+    un nom commun ferait écrire le gras avec la police normale.
     """
-    if span.mono:
-        if os.path.exists(r"C:\Windows\Fonts\cour.ttf"):
-            return "cour", r"C:\Windows\Fonts\cour.ttf"
-        return "cour", None
-    chemin = WINDOWS_FONTS.get((span.bold, span.italic))
-    if chemin and os.path.exists(chemin):
-        return "pdfstudio", chemin
-    if span.serif:
-        return "tiro", None
-    return "helv", None
+    famille = "mono" if span.mono else "serif" if span.serif else "sans"
+    fichier, standard = POLICES[famille][(span.bold, span.italic)]
+    chemin = os.path.join(DOSSIER_POLICES, fichier + ".ttf")
+    if os.path.exists(chemin):
+        return f"ps-{fichier}", chemin
+    return standard, None
 
 
 def _redact_rects(page: fitz.Page, rects: list[fitz.Rect]) -> None:
