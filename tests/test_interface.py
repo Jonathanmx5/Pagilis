@@ -877,3 +877,24 @@ def test_other_pages_use_the_saved_file(ui, contrat, tmp_path):
         assert app.chemin_pdf == str(tmp_path / "corrige2.pdf")
 
     executer(app, scenario)
+
+
+@pytest.mark.parametrize("niveau, attendu", [
+    ("origine", "Ligne corrigée, police d'origine conservée."),
+    ("installee", "Ligne corrigée avec la police d'origine, installée sur ce PC."),
+    ("remplacement", "Ligne corrigée. Police d'origine indisponible pour ces caractères : "
+                     "réécrite en Arial, Times ou Courier."),
+])
+def test_status_tells_which_font_was_used(ui, contrat, monkeypatch, niveau, attendu):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        monkeypatch.setattr(app.edition, "corriger", lambda *a: niveau)
+        app._valider_saisie()
+        assert app.etat.cget("text") == attendu
+
+    executer(app, scenario)

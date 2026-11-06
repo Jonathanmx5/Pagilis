@@ -11,6 +11,8 @@ Conventions :
 
 from __future__ import annotations
 
+import functools
+import glob
 import io
 import os
 import re
@@ -502,6 +504,137 @@ def _font_for(span: TextSpan) -> tuple[Optional[str], Optional[str]]:
     return standard, None
 
 
+# Police d'une ligne réécrite, de la plus fidèle à la plus sûre.
+POLICE_ORIGINE = "origine"            # celle du PDF (embarquée, ou police PDF standard)
+POLICE_INSTALLEE = "installee"        # la même, installée sur ce PC
+POLICE_REMPLACEMENT = "remplacement"  # Arial / Times / Courier selon le style
+LIGNE_EFFACEE = "effacee"             # texte vide : rien n'est réécrit
+
+# Polices PDF standard (non embarquées) : nom complet -> code court PyMuPDF.
+_POLICES_STANDARD = {v.lower(): k for k, v in fitz.Base14_fontdict.items() if len(k) == 4}
+
+
+@dataclass
+class Police:
+    """Police retenue pour écrire un texte, et d'où elle vient."""
+
+    fontname: str
+    font: fitz.Font
+    niveau: str
+    fontfile: Optional[str] = None
+    fontbuffer: Optional[bytes] = None
+
+
+def _cle_police(nom: str) -> str:
+    """Clé de comparaison d'un nom de police, PDF ou Windows.
+
+    « BCDEEE+Aptos », « Aptos Regular » -> « aptos » ;
+    « TimesNewRomanPS-BoldMT », « Times New Roman Bold » -> « timesnewromanbold ».
+    """
+    nom = re.sub(r"^[A-Z]{6}\+", "", nom.strip())   # préfixe de sous-ensemble
+    nom = re.sub(r"\((TrueType|OpenType)\)", "", nom)
+    cle = re.sub(r"[^a-z0-9]", "", nom.lower())
+    cle = re.sub(r"mt$", "", cle)                    # ArialMT, TimesNewRomanPSMT
+    cle = re.sub(r"ps(?=(bold|italic|oblique|bolditalic)?$)", "", cle)
+    return re.sub(r"regular$", "", cle)
+
+
+@functools.lru_cache(maxsize=1)
+def polices_installees() -> dict[str, str]:
+    """Polices installées sur ce PC : clé de nom -> fichier. Lu une seule fois.
+
+    Liste de Windows (registre, instantané) et polices d'Office téléchargées
+    (Aptos…), rangées à part dans le cache de polices.
+    """
+    polices: dict[str, str] = {}
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover - hors Windows
+        return polices
+    dossier_windows = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    for racine in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(racine, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts") as cle:
+                i = 0
+                while True:
+                    try:
+                        nom, fichier, _type = winreg.EnumValue(cle, i)
+                    except OSError:
+                        break
+                    i += 1
+                    if not isinstance(fichier, str):
+                        continue
+                    chemin = fichier if os.path.isabs(fichier) else os.path.join(dossier_windows, fichier)
+                    for partie in nom.split(" & "):  # « Cambria & Cambria Math (TrueType) »
+                        polices.setdefault(_cle_police(partie), chemin)
+        except OSError:
+            continue
+    nuage = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "FontCache", "4", "CloudFonts")
+    for chemin in glob.glob(os.path.join(nuage, "*", "*")):
+        try:
+            polices.setdefault(_cle_police(fitz.Font(fontfile=chemin).name), chemin)
+        except Exception:  # noqa: BLE001 - fichier illisible : ignoré
+            continue
+    return polices
+
+
+def _a_les_glyphes(font: fitz.Font, texte: str) -> bool:
+    return all(font.has_glyph(ord(c)) for c in set(texte) if c >= " ")
+
+
+def _police_pour(page: fitz.Page, span: TextSpan, texte: str) -> Police:
+    """Police pour écrire `texte` au style de `span`, la plus fidèle possible.
+
+    1. celle du PDF : police standard, ou police embarquée qui contient tous
+       les caractères (une police embarquée n'a souvent que ceux déjà utilisés) ;
+    2. la même police installée sur ce PC ;
+    3. Arial / Times / Courier selon le style.
+    À appeler AVANT d'effacer le texte : le caviardage peut retirer la police
+    de la page si plus rien ne l'utilise.
+    """
+    cle = _cle_police(span.font)
+    standard = _POLICES_STANDARD.get(re.sub(r"^[A-Z]{6}\+", "", span.font).lower())
+    if standard:
+        try:
+            texte.encode("cp1252")  # les polices standard n'écrivent que ces caractères
+            return Police(standard, fitz.Font(standard), POLICE_ORIGINE)
+        except UnicodeEncodeError:
+            pass
+    for xref, _ext, _type, base, *_reste in page.get_fonts(full=True):
+        if _cle_police(base) != cle:
+            continue
+        donnees = page.parent.extract_font(xref)[3]
+        if not donnees:
+            continue
+        try:
+            font = fitz.Font(fontbuffer=donnees)
+        except Exception:  # noqa: BLE001 - police embarquée inutilisable
+            continue
+        if _a_les_glyphes(font, texte):
+            return Police(f"pe-{xref}", font, POLICE_ORIGINE, fontbuffer=donnees)
+    chemin = polices_installees().get(cle)
+    if chemin and os.path.exists(chemin):
+        try:
+            font = fitz.Font(fontfile=chemin)
+            if _a_les_glyphes(font, texte):
+                nom = "pi-" + re.sub(r"[^A-Za-z0-9]", "", os.path.splitext(os.path.basename(chemin))[0])
+                return Police(nom, font, POLICE_INSTALLEE, fontfile=chemin)
+        except Exception:  # noqa: BLE001 - fichier illisible : niveau suivant
+            pass
+    fontname, fontfile = _font_for(span)
+    font = fitz.Font(fontfile=fontfile) if fontfile else fitz.Font(fontname)
+    return Police(fontname, font, POLICE_REMPLACEMENT, fontfile=fontfile)
+
+
+def _reduction(police: Police, ancien: str, nouveau: str, taille: float) -> float:
+    """Facteur de taille pour que `nouveau` tienne dans la largeur de `ancien`."""
+    largeur_ancienne = police.font.text_length(ancien, fontsize=taille)
+    largeur_nouvelle = police.font.text_length(nouveau, fontsize=taille)
+    if largeur_nouvelle > largeur_ancienne > 0:
+        return largeur_ancienne / largeur_nouvelle
+    return 1.0
+
+
 def _redact_rects(page: fitz.Page, rects: list[fitz.Rect]) -> None:
     """Efface le texte sans boîte blanche, en ne touchant ni images ni dessins.
 
@@ -526,21 +659,25 @@ def _redact_rects(page: fitz.Page, rects: list[fitz.Rect]) -> None:
         )
 
 
-def _write_span(page: fitz.Page, span: TextSpan, origin: fitz.Point, shrink: float = 1.0) -> None:
+def _write_span(page: fitz.Page, span: TextSpan, origin: fitz.Point, shrink: float = 1.0,
+                police: Optional[Police] = None) -> None:
     """Réécrit un segment au même style, à la même ligne de base.
 
     origin est dans le repère non tourné, comme get_text et insert_text ;
     rotate=page.rotation fait apparaître le texte droit à l'affichage.
+    `police` doit avoir été choisie avant l'effacement (voir _police_pour).
     """
-    fontname, fontfile = _font_for(span)
+    police = police or _police_pour(page, span, span.text)
+    if police.fontbuffer is not None:
+        page.insert_font(fontname=police.fontname, fontbuffer=police.fontbuffer)
     kwargs = dict(
-        fontname=fontname,
+        fontname=police.fontname,
         fontsize=span.size * shrink,
         color=_rgb(span.color),
         rotate=page.rotation,
     )
-    if fontfile:
-        kwargs["fontfile"] = fontfile
+    if police.fontfile:
+        kwargs["fontfile"] = police.fontfile
     page.insert_text(fitz.Point(origin), span.text, **kwargs)
 
 
@@ -575,23 +712,21 @@ def replace_text(
             for line, _chars in iter_lines(page):
                 if any(fitz.Rect(line["bbox"]).intersects(r) for r in rects):
                     morceaux_a_reecrire.append(_spans_of_line(line))
-            # On efface TOUTE la ligne touchée (mots voisins compris), puis on réécrit.
-            _redact_rects(page, [s.bbox for spans in morceaux_a_reecrire for s in spans])
+            # Polices choisies AVANT l'effacement (qui peut les retirer de la page).
+            a_ecrire = []
             for spans in morceaux_a_reecrire:
                 for span in spans:
                     texte_nouveau = _substitute(span.text, old, new, match_case)
-                    if texte_nouveau == span.text:
-                        _write_span(page, span, span.origin)
-                        continue
-                    shrink = 1.0
-                    if shrink_if_longer and texte_nouveau:
-                        largeur_ancienne = fitz.get_text_length(span.text, fontname="helv", fontsize=span.size)
-                        largeur_nouvelle = fitz.get_text_length(texte_nouveau, fontname="helv", fontsize=span.size)
-                        if largeur_nouvelle > largeur_ancienne > 0:
-                            shrink = largeur_ancienne / largeur_nouvelle
                     if texte_nouveau:
-                        span.text = texte_nouveau
-                        _write_span(page, span, span.origin, shrink)
+                        a_ecrire.append((span, texte_nouveau, _police_pour(page, span, texte_nouveau)))
+            # On efface TOUTE la ligne touchée (mots voisins compris), puis on réécrit.
+            _redact_rects(page, [s.bbox for spans in morceaux_a_reecrire for s in spans])
+            for span, texte_nouveau, police in a_ecrire:
+                shrink = 1.0
+                if shrink_if_longer and texte_nouveau != span.text:
+                    shrink = _reduction(police, span.text, texte_nouveau, span.size)
+                span.text = texte_nouveau
+                _write_span(page, span, span.origin, shrink, police)
             total += len(rects)
         if progress:
             progress(k + 1, len(pages))
@@ -630,14 +765,11 @@ def move_text_block(
             lignes.append(_spans_of_line(line))
     if not lignes:
         return 0
-    rects = [span.bbox for spans in lignes for span in spans]
-    _redact_rects(page, rects)
-    compte = 0
-    for spans in lignes:
-        for span in spans:
-            _write_span(page, span, span.origin + decalage)
-            compte += 1
-    return compte
+    polices = [(span, _police_pour(page, span, span.text)) for spans in lignes for span in spans]
+    _redact_rects(page, [span.bbox for span, _p in polices])
+    for span, police in polices:
+        _write_span(page, span, span.origin + decalage, police=police)
+    return len(polices)
 
 
 # ------------------------------------------------- édition rapide d'une ligne
@@ -682,13 +814,17 @@ def rewrite_line(
     point: fitz.Point,
     new_text: str,
     shrink_if_longer: bool = True,
-) -> bool:
+) -> str | bool:
     """Remplace tout le texte de la ligne sous `point` (repère affiché) par new_text.
 
     La ligne est réécrite au style de son segment le plus long, à la ligne de
-    base de son premier segment ; un texte plus large est réduit pour tenir
-    dans la largeur d'origine. Texte vide : la ligne est effacée. Retourne
-    Faux si aucune ligne n'est sous le point ou si le texte est inchangé.
+    base de son premier segment, dans la police la plus fidèle possible ; un
+    texte plus large est réduit pour tenir dans la largeur d'origine. Texte
+    vide : la ligne est effacée.
+
+    Retourne le niveau de police utilisé (POLICE_ORIGINE, POLICE_INSTALLEE,
+    POLICE_REMPLACEMENT) ou LIGNE_EFFACEE ; Faux si aucune ligne n'est sous le
+    point ou si le texte est inchangé.
     """
     page = doc[page_index]
     line = _line_under(page, point)
@@ -698,18 +834,16 @@ def rewrite_line(
     ancien = "".join(s.text for s in spans)
     if new_text == ancien:
         return False
+    if not new_text:
+        _redact_rects(page, [s.bbox for s in spans])
+        return LIGNE_EFFACEE
+    principal = max(spans, key=lambda s: len(s.text))
+    police = _police_pour(page, principal, new_text)  # avant l'effacement
+    reduction = _reduction(police, ancien, new_text, principal.size) if shrink_if_longer else 1.0
     _redact_rects(page, [s.bbox for s in spans])
-    if new_text:
-        principal = max(spans, key=lambda s: len(s.text))
-        reduction = 1.0
-        if shrink_if_longer:
-            largeur_ancienne = fitz.get_text_length(ancien, fontname="helv", fontsize=principal.size)
-            largeur_nouvelle = fitz.get_text_length(new_text, fontname="helv", fontsize=principal.size)
-            if largeur_nouvelle > largeur_ancienne > 0:
-                reduction = largeur_ancienne / largeur_nouvelle
-        segment = TextSpan(**{**principal.__dict__, "text": new_text})
-        _write_span(page, segment, spans[0].origin, reduction)
-    return True
+    segment = TextSpan(**{**principal.__dict__, "text": new_text})
+    _write_span(page, segment, spans[0].origin, reduction, police)
+    return police.niveau
 
 
 # ----------------------------------------------------------------- OCR

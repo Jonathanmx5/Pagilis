@@ -11,6 +11,16 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.4.0]
+
+- Une ligne corrigée garde sa police d'origine : celle du PDF quand elle
+  contient tous les caractères du nouveau texte, sinon la même police
+  installée sur le PC (Aptos, Calibri, Garamond…). Arial, Times ou Courier ne
+  servent plus qu'en dernier recours, et la barre d'état indique la police
+  utilisée. Vaut aussi pour « Remplacer du texte » et « Déplacer du texte ».
+- Un texte plus long que l'original est réduit selon la largeur réelle de sa
+  police.
+
 ## [1.3.0]
 
 - Nouvelle fonction « Modifier » : cliquez sur une ligne pour corriger son

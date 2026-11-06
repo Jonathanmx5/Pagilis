@@ -493,3 +493,86 @@ def test_rewrite_line_no_line_returns_false(tmp_path):
 ])
 def test_serif_style_trusts_font_name_before_flag(police, drapeaux, serif):
     assert core._style_flags({"font": police, "flags": drapeaux})[2] is serif
+
+
+# ------------------------------------------- police d'origine à la réécriture
+
+GEORGIA = r"C:\Windows\Fonts\georgia.ttf"
+avec_georgia = pytest.mark.skipif(not os.path.exists(GEORGIA), reason="Georgia absente")
+
+
+def pdf_georgia(path, sous_ensemble=False):
+    """Ligne écrite en Georgia embarquée (entière, ou réduite aux caractères utilisés)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_font(fontname="F1", fontfile=GEORGIA)
+    page.insert_text((50, 100), "Montant total : 1 200 euros.", fontname="F1", fontsize=12)
+    page.insert_text((50, 140), "Autre ligne", fontname="helv", fontsize=12)
+    if sous_ensemble:
+        doc.subset_fonts()
+    doc.save(path)
+    return str(path)
+
+
+def police_de(page, needle):
+    return [s["font"] for b in page.get_text("dict")["blocks"] for l in b["lines"]
+            for s in l["spans"] if needle in s["text"]][0]
+
+
+@pytest.fixture
+def sans_polices_installees(monkeypatch):
+    monkeypatch.setattr(core, "polices_installees", lambda: {})
+
+
+@avec_georgia
+def test_rewrite_keeps_embedded_font_when_all_glyphs_exist(tmp_path, sans_polices_installees):
+    doc = fitz.open(pdf_georgia(tmp_path / "g.pdf"))
+    page = doc[0]
+    assert core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 950 euros.") == core.POLICE_ORIGINE
+    assert "Georgia" in police_de(page, "950")
+    assert "Montant total : 950 euros." in texte_page(page)
+
+
+def test_rewrite_keeps_standard_pdf_font(tmp_path, sans_polices_installees):
+    doc = fitz.open(make_pdf(tmp_path / "l.pdf", texts={0: LIGNES}))  # Helvetica, non embarquée
+    page = doc[0]
+    assert core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant : 5 euros.") == core.POLICE_ORIGINE
+    assert police_de(page, "5 euros") == "Helvetica"
+
+
+@avec_georgia
+def test_rewrite_falls_back_when_a_glyph_is_missing(tmp_path, sans_polices_installees):
+    doc = fitz.open(pdf_georgia(tmp_path / "g.pdf", sous_ensemble=True))
+    page = doc[0]
+    niveau = core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 950 euros.")
+    assert niveau == core.POLICE_REMPLACEMENT
+    assert "Georgia" not in police_de(page, "950")
+    assert "Montant total : 950 euros." in texte_page(page)
+
+
+@avec_georgia
+def test_rewrite_uses_installed_font_with_same_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "polices_installees", lambda: {core._cle_police("Georgia"): GEORGIA})
+    doc = fitz.open(pdf_georgia(tmp_path / "g.pdf", sous_ensemble=True))
+    page = doc[0]
+    niveau = core.rewrite_line(doc, 0, centre_ligne(page, "Montant"), "Montant total : 950 € été.")
+    assert niveau == core.POLICE_INSTALLEE
+    assert "Georgia" in police_de(page, "950")
+    assert "Montant total : 950 € été." in texte_page(page)
+
+
+@pytest.mark.parametrize("pdf, installee", [
+    ("ABCDEF+TimesNewRomanPSMT", "Times New Roman"),
+    ("TimesNewRomanPS-BoldMT", "Times New Roman Bold"),
+    ("ArialMT", "Arial"),
+    ("Calibri-Bold", "Calibri Bold"),
+    ("BCDEEE+Aptos", "Aptos Regular"),
+    ("Georgia", "Georgia"),
+])
+def test_font_keys_match_pdf_and_windows_names(pdf, installee):
+    assert core._cle_police(pdf) == core._cle_police(installee)
+
+
+def test_installed_fonts_come_from_windows():
+    polices = core.polices_installees()
+    assert polices.get(core._cle_police("Arial")) and os.path.exists(polices[core._cle_police("Arial")])

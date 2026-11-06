@@ -62,6 +62,15 @@ def sauver_config(config: dict) -> None:
 # devient un glisser (déplacer le bloc) au lieu d'un clic (corriger la ligne).
 SEUIL_GLISSER = 5
 
+# Statut après une correction, selon la police utilisée pour réécrire la ligne.
+MESSAGES_POLICE = {
+    core.POLICE_ORIGINE: "Ligne corrigée, police d'origine conservée.",
+    core.POLICE_INSTALLEE: "Ligne corrigée avec la police d'origine, installée sur ce PC.",
+    core.POLICE_REMPLACEMENT: "Ligne corrigée. Police d'origine indisponible pour ces caractères : "
+                              "réécrite en Arial, Times ou Courier.",
+    core.LIGNE_EFFACEE: "Ligne effacée.",
+}
+
 # Fonctions affichées dans la barre latérale : (nom, icône, description).
 FONCTIONS = [
     ("Modifier", "✎", "Corriger ou déplacer du texte, PDF ou Word"),
@@ -93,7 +102,6 @@ class Pagilis(ctk.CTk):
         self._ligne_saisie: core.LineInfo | None = None
         self._contexte_saisie = None  # (page, zoom, décalage) à l'ouverture de la zone
         self._fenetre_saisie = None   # élément du canevas qui porte la zone
-        self._rappel_police = False   # rappel « police réécrite » déjà affiché
         # PDF issus des conversions Word de la session ; dossier supprimé à la fermeture.
         self.dossier_conversions = tempfile.mkdtemp(prefix="pagilis-word-")
         self.page_active = FONCTIONS[0][0]
@@ -1301,10 +1309,10 @@ class Pagilis(ctk.CTk):
         ligne, index, texte = self._ligne_saisie, self.apercu.index, self.saisie.get()
         self._fermer_saisie()
         centre = fitz.Point((ligne.rect.x0 + ligne.rect.x1) / 2, (ligne.rect.y0 + ligne.rect.y1) / 2)
-        if self._retoucher(lambda: self.edition.corriger(index, centre, texte)) and not self._rappel_police:
-            self._rappel_police = True
-            self.statut("Ligne corrigée. Elle est réécrite en Arial, Times ou Courier selon son style "
-                        "(la police d'origine n'est pas reprise).")
+        niveau = self._retoucher(lambda: self.edition.corriger(index, centre, texte))
+        message = MESSAGES_POLICE.get(niveau)
+        if message:
+            self.statut(message)
 
     def _retoucher(self, action):
         """Applique une retouche de la copie de travail et rafraîchit l'aperçu."""

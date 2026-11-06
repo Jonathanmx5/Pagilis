@@ -34,7 +34,7 @@ import identite
 
 # Version EN COURS DE DÉVELOPPEMENT (doit avoir sa section dans CHANGELOG.md).
 # À la publication, la CI la remplace par celle du tag git (v1.2.3 -> "1.2.3").
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 # Dépôt GitHub qui héberge les versions publiées (voir .github/workflows/release.yml).
 GITHUB_REPO = identite.DEPOT_GITHUB

@@ -34,9 +34,10 @@ s'il n'y a pas Word ; sans l'un des deux, il ne peut pas être ouvert.
 
 ## Limites connues
 
-- Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée (les
-  polices incorporées sont des sous-ensembles). Le texte est réécrit en Arial,
-  Times New Roman ou Courier New selon son style.
+- Remplacer / modifier / déplacer du texte : la police d'origine est reprise
+  quand le PDF la contient avec tous les caractères nécessaires, ou quand elle
+  est installée sur le PC ; sinon le texte est réécrit en Arial, Times New Roman
+  ou Courier New selon son style.
 - Pas de recherche à cheval sur deux lignes.
 - Pas de détection des pages à l'envers ou couchées à 90°.
 - Le redressement des pages penchées et le remplacement de texte sur un scan ne
