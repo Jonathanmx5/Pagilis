@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Tests de l'auto-vérification (« PDFStudio.exe --verifier »)."""
+"""Tests de l'auto-vérification (« Pagilis.exe --verifier »)."""
 
 import os
 import sys

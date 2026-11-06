@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Interface de PDF Studio (CustomTkinter). Toute la logique est dans pdf_core."""
+"""Interface de Pagilis (CustomTkinter). Toute la logique est dans pdf_core."""
 
 from __future__ import annotations
 
@@ -17,13 +17,14 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image, ImageTk
 
+import identite
 import installation
 import pdf_core as core
 import updater
 from apercu import Apercu
 
 # Limites connues, affichées dans « Aide et limites ».
-LIMITES = """Limites connues de PDF Studio
+LIMITES = """Limites connues de Pagilis
 
 • Remplacer / déplacer du texte : la police d'origine n'est pas réutilisée
   (les polices incorporées sont des sous-ensembles). Le texte est réécrit en
@@ -35,7 +36,7 @@ LIMITES = """Limites connues de PDF Studio
   ne sont pas encore disponibles.
 • Un .exe non signé peut être signalé par Windows Defender.
 
-Licence : PDF Studio est un logiciel libre distribué sous licence
+Licence : Pagilis est un logiciel libre distribué sous licence
 GNU AGPL-3.0, comme la bibliothèque PyMuPDF qu'il utilise. Il est fourni
 sans aucune garantie. Code source : {source}
 
@@ -45,11 +46,14 @@ Journal d'erreurs : {log}"""
 URL_SOURCE = f"https://github.com/{updater.GITHUB_REPO}"
 
 # Dossier de configuration et journal, indispensables avec --noconsole.
-DOSSIER_DONNEES = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "PDFStudio")
+_LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+DOSSIER_DONNEES = os.path.join(_LOCALAPPDATA, identite.DOSSIER_DONNEES)
 os.makedirs(DOSSIER_DONNEES, exist_ok=True)
+# Préférences de PDF Studio (nom d'avant la 1.2.0) reprises au premier lancement de Pagilis.
+installation.reprendre_preferences(os.path.join(_LOCALAPPDATA, identite.ANCIEN_DOSSIER_DONNEES), DOSSIER_DONNEES)
 CONFIG = os.path.join(DOSSIER_DONNEES, "config.json")
 logging.basicConfig(
-    filename=os.path.join(DOSSIER_DONNEES, "pdfstudio.log"),
+    filename=os.path.join(DOSSIER_DONNEES, "pagilis.log"),
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     encoding="utf-8",
@@ -85,12 +89,12 @@ FONCTIONS = [
 ]
 
 
-class PDFStudio(ctk.CTk):
+class Pagilis(ctk.CTk):
     """Fenêtre principale : fonctions dans une barre à gauche, page de travail à droite."""
 
     def __init__(self):
         super().__init__()
-        self.title("PDF Studio")
+        self.title("Pagilis")
         self.geometry("1280x780")
         self.minsize(1080, 640)
         self.config_data = charger_config()
@@ -174,7 +178,7 @@ class PDFStudio(ctk.CTk):
         barre.grid(row=0, column=0, sticky="nsw")
         barre.grid_propagate(False)
         barre.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(barre, text="PDF Studio", font=ctk.CTkFont(size=22, weight="bold"),
+        ctk.CTkLabel(barre, text="Pagilis", font=ctk.CTkFont(size=22, weight="bold"),
                      anchor="w").grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 0))
         ctk.CTkLabel(barre, text=f"Version {updater.APP_VERSION}", text_color=("gray40", "gray60"),
                      anchor="w").grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
@@ -228,27 +232,27 @@ class PDFStudio(ctk.CTk):
         """Fenêtre « Installer sur ce PC » (version portable uniquement)."""
         deja = installation.est_installe()
         fenetre = ctk.CTkToplevel(self)
-        fenetre.title("Installer PDF Studio")
+        fenetre.title("Installer Pagilis")
         fenetre.geometry("480x330")
         fenetre.resizable(False, False)
         fenetre.transient(self)
         fenetre.grab_set()
-        ctk.CTkLabel(fenetre, text="Installer PDF Studio sur ce PC",
+        ctk.CTkLabel(fenetre, text="Installer Pagilis sur ce PC",
                      font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", padx=24, pady=(22, 6))
         explication = (
-            "PDF Studio sera copié dans votre dossier utilisateur et ajouté au menu Démarrer. "
+            "Pagilis sera copié dans votre dossier utilisateur et ajouté au menu Démarrer. "
             "Aucun droit administrateur n'est nécessaire, et vous pourrez le désinstaller depuis "
             "« Paramètres > Applications installées ».\n\n"
             f"Emplacement : {installation.Emplacements().dossier}"
         )
         if deja:
-            explication += "\n\nPDF Studio est déjà installé : la copie installée sera remplacée par celle-ci."
+            explication += "\n\nPagilis est déjà installé : la copie installée sera remplacée par celle-ci."
         ctk.CTkLabel(fenetre, text=explication, wraplength=430, justify="left",
                      text_color=("gray30", "gray70")).pack(anchor="w", padx=24)
         bureau = ctk.BooleanVar(value=True)
         ouvrir_avec = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(fenetre, text="Créer un raccourci sur le Bureau", variable=bureau).pack(anchor="w", padx=24, pady=(14, 4))
-        ctk.CTkCheckBox(fenetre, text="Proposer PDF Studio dans « Ouvrir avec » pour les PDF",
+        ctk.CTkCheckBox(fenetre, text="Proposer Pagilis dans « Ouvrir avec » pour les PDF",
                         variable=ouvrir_avec).pack(anchor="w", padx=24, pady=4)
         boutons = ctk.CTkFrame(fenetre, fg_color="transparent")
         boutons.pack(fill="x", side="bottom", padx=24, pady=20)
@@ -262,14 +266,19 @@ class PDFStudio(ctk.CTk):
             installe = installation.installer(installation.exe_courant(), updater.APP_VERSION,
                                               raccourci_bureau=bureau, ouvrir_avec=ouvrir_avec)
         except PermissionError:
-            return messagebox.showerror("PDF Studio", "La version installée est ouverte. "
+            return messagebox.showerror("Pagilis", "La version installée est ouverte. "
                                                       "Fermez-la, puis recommencez.", parent=fenetre)
         except OSError as exc:
             logging.exception("Installation impossible")
-            return messagebox.showerror("PDF Studio", f"Installation impossible :\n{exc}", parent=fenetre)
+            return messagebox.showerror("Pagilis", f"Installation impossible :\n{exc}", parent=fenetre)
         fenetre.destroy()
         logging.info("Installé dans %s", installe)
-        if messagebox.askyesno("PDF Studio", "PDF Studio est installé.\n\n"
+        # Une installation de PDF Studio (nom d'avant) ferait doublon : on la retire.
+        ancienne = installation.ancienne_installation()
+        if ancienne.exe.exists():
+            installation.desinstaller(ancienne)
+            logging.info("Ancienne installation %s retirée", identite.ANCIEN_NOM)
+        if messagebox.askyesno("Pagilis", "Pagilis est installé.\n\n"
                                              "Fermer cette version portable et ouvrir la version installée ?"):
             subprocess.Popen([str(installe)], env=updater.environnement_lancement(), close_fds=True)
             self._fermer()
@@ -281,7 +290,7 @@ class PDFStudio(ctk.CTk):
 
     def afficher_aide(self):
         messagebox.showinfo("Aide et limites", LIMITES.format(
-            log=os.path.join(DOSSIER_DONNEES, "pdfstudio.log"), source=URL_SOURCE))
+            log=os.path.join(DOSSIER_DONNEES, "pagilis.log"), source=URL_SOURCE))
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
@@ -354,7 +363,7 @@ class PDFStudio(ctk.CTk):
             bouton_quitter.configure(state="disabled")
             etat.configure(text="Téléchargement…")
             barre.pack(fill="x", padx=20, before=etat)
-            destination = os.path.join(DOSSIER_DONNEES, "PDFStudio_new.exe")
+            destination = os.path.join(DOSSIER_DONNEES, "Pagilis_new.exe")
 
             def progression(lu, total):
                 if total:
@@ -447,7 +456,7 @@ class PDFStudio(ctk.CTk):
                 # Un mot de passe faux relève PasswordRequired : on redemande.
             except Exception:  # noqa: BLE001 - fichier illisible, on le dit sans planter
                 logging.exception("Ouverture impossible : %s", chemin)
-                messagebox.showerror("PDF Studio", f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
+                messagebox.showerror("Pagilis", f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
                 return
         self.chemin_pdf = chemin
         self.label_fichier.configure(text=os.path.basename(chemin))
@@ -479,14 +488,14 @@ class PDFStudio(ctk.CTk):
                 # Demande le mot de passe dans le thread de l'interface, puis relance.
                 chemin = exc.path
                 self.after(0, lambda: self._relancer_avec_mot_de_passe(chemin, travail, fin))
-            except core.PdfStudioError as exc:
+            except core.PagilisError as exc:
                 message = str(exc)
-                self.after(0, lambda: messagebox.showwarning("PDF Studio", message))
+                self.after(0, lambda: messagebox.showwarning("Pagilis", message))
                 self.after(0, lambda: self.statut(message))
             except Exception:  # noqa: BLE001 - tout doit finir dans le journal
                 logging.error(traceback.format_exc())
                 self.after(0, lambda: messagebox.showerror(
-                    "PDF Studio", "Erreur inattendue. Détails dans pdfstudio.log."))
+                    "Pagilis", "Erreur inattendue. Détails dans pagilis.log."))
             finally:
                 self.after(0, lambda: self.barre.set(0))
                 self.after(0, self._fin_travail)
@@ -525,7 +534,7 @@ class PDFStudio(ctk.CTk):
         ) or None
 
     def proposer_ouverture(self, chemin: str):
-        if messagebox.askyesno("PDF Studio", "Ouvrir le résultat ?"):
+        if messagebox.askyesno("Pagilis", "Ouvrir le résultat ?"):
             os.startfile(chemin)  # noqa: S606 - Windows uniquement
 
     def _continuer_sur_resultat(self, var: ctk.BooleanVar, chemin: str):
@@ -571,7 +580,7 @@ class PDFStudio(ctk.CTk):
 
     def _exiger_pdf(self) -> bool:
         if not self.chemin_pdf:
-            messagebox.showinfo("PDF Studio", "Ouvrez d'abord un PDF (bouton en haut à droite).")
+            messagebox.showinfo("Pagilis", "Ouvrez d'abord un PDF (bouton en haut à droite).")
             return False
         return True
 
@@ -649,7 +658,7 @@ class PDFStudio(ctk.CTk):
     def lancer_fusion(self):
         fichiers = list(self.liste_fusion)
         if len(fichiers) < 2:
-            return messagebox.showinfo("PDF Studio", "Ajoutez au moins deux PDF à fusionner.")
+            return messagebox.showinfo("Pagilis", "Ajoutez au moins deux PDF à fusionner.")
         sortie = filedialog.asksaveasfilename(initialdir=self.dernier_dossier, initialfile="fusion.pdf",
                                               defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
         if not sortie:
@@ -683,9 +692,9 @@ class PDFStudio(ctk.CTk):
         n = self.entree_n.get().strip()
         plages = self.entree_plages.get().strip()
         if mode == "n" and not n.isdigit():
-            return messagebox.showwarning("PDF Studio", "Indiquez un nombre entier pour N.")
+            return messagebox.showwarning("Pagilis", "Indiquez un nombre entier pour N.")
         if mode == "plages" and not plages:
-            return messagebox.showwarning("PDF Studio", "Indiquez les plages, par exemple « 1-3, 5, 8- ».")
+            return messagebox.showwarning("Pagilis", "Indiquez les plages, par exemple « 1-3, 5, 8- ».")
         dossier = filedialog.askdirectory(initialdir=self.dernier_dossier)
         if not dossier:
             return
@@ -751,7 +760,7 @@ class PDFStudio(ctk.CTk):
             with Image.open(chemin) as im:
                 self.ratio_tampon = im.height / im.width
         except OSError:
-            return messagebox.showerror("PDF Studio", "Image illisible.")
+            return messagebox.showerror("Pagilis", "Image illisible.")
         self.image_tampon = chemin
         self.label_tampon.configure(text=os.path.basename(chemin))
         self.apercu.redessiner()
@@ -787,7 +796,7 @@ class PDFStudio(ctk.CTk):
         if not self._exiger_pdf():
             return
         if not self.image_tampon:
-            return messagebox.showinfo("PDF Studio", "Choisissez d'abord une image.")
+            return messagebox.showinfo("Pagilis", "Choisissez d'abord une image.")
         try:
             opts = core.StampOptions(
                 x=float(self.entree_x.get()),
@@ -798,14 +807,14 @@ class PDFStudio(ctk.CTk):
                 white_transparent=self.blanc_transparent.get(),
             )
         except ValueError:
-            return messagebox.showwarning("PDF Studio", "Vérifiez les valeurs numériques.")
+            return messagebox.showwarning("Pagilis", "Vérifiez les valeurs numériques.")
         source = self.chemin_pdf
         image = self.image_tampon
         portee = self.portee_tampon.get()
         plage = self.entree_plage_tampon.get().strip()
         page_affichee = self.apercu.index
         if portee == "plage" and not plage:
-            return messagebox.showwarning("PDF Studio", "Indiquez la plage de pages.")
+            return messagebox.showwarning("Pagilis", "Indiquez la plage de pages.")
         sortie = self.enregistrer_sous("signe")
         if not sortie:
             return
@@ -904,7 +913,7 @@ class PDFStudio(ctk.CTk):
             return
         ancien = self.entree_ancien.get()
         if not ancien:
-            return messagebox.showinfo("PDF Studio", "Saisissez le texte à remplacer.")
+            return messagebox.showinfo("Pagilis", "Saisissez le texte à remplacer.")
         nouveau = self.entree_nouveau.get()
         casse = self.casse.get()
         reduire = self.reduire.get()
@@ -931,7 +940,7 @@ class PDFStudio(ctk.CTk):
         self.resultats_recherche = {}
         if n == 0:
             self.statut("Aucune occurrence remplacée.")
-            return messagebox.showinfo("PDF Studio", "Aucune occurrence trouvée : le fichier créé est identique.\n"
+            return messagebox.showinfo("Pagilis", "Aucune occurrence trouvée : le fichier créé est identique.\n"
                                                      "Si c'est un scan, passez d'abord par « OCR (scans) ».")
         self._apres_sauvegarde(sortie, self.continuer_rempl, f"{n} remplacement(s).")
 
@@ -980,11 +989,11 @@ class PDFStudio(ctk.CTk):
         if not self._exiger_pdf():
             return
         if self.selection is None:
-            return messagebox.showinfo("PDF Studio", "Sélectionnez d'abord un bloc de texte dans l'aperçu.")
+            return messagebox.showinfo("Pagilis", "Sélectionnez d'abord un bloc de texte dans l'aperçu.")
         zone = fitz.Rect(self.selection)
         dx, dy = self._decalage()
         if dx == 0 and dy == 0:
-            return messagebox.showinfo("PDF Studio", "Faites glisser la sélection ou indiquez un décalage.")
+            return messagebox.showinfo("Pagilis", "Faites glisser la sélection ou indiquez un décalage.")
         page = self.apercu.index
         source = self.chemin_pdf
         sortie = self.enregistrer_sous("deplace")
@@ -1007,7 +1016,7 @@ class PDFStudio(ctk.CTk):
     def _fin_deplacement(self, n: int, sortie: str):
         if n == 0:
             self.statut("Aucun texte dans la zone sélectionnée.")
-            return messagebox.showinfo("PDF Studio", "La zone sélectionnée ne contient pas de texte lisible "
+            return messagebox.showinfo("Pagilis", "La zone sélectionnée ne contient pas de texte lisible "
                                                      "horizontalement. Rien n'a été enregistré.")
         self.selection = None
         self._maj_champs_deplacement()
@@ -1060,7 +1069,7 @@ class PDFStudio(ctk.CTk):
         self.config_data.update(langue_ocr=self.langue_ocr.get(), langue2_ocr=self.langue2_ocr.get(),
                                 tessdata=tessdata or "")
         if core.find_tessdata(tessdata) is None:
-            return messagebox.showwarning("PDF Studio", "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
+            return messagebox.showwarning("Pagilis", "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
                                                         "Indiquez le dossier « tessdata » qui les contient.")
         source = self.chemin_pdf
         sortie = self.enregistrer_sous("ocr")
@@ -1083,7 +1092,7 @@ class PDFStudio(ctk.CTk):
     def _fin_ocr(self, n: int, sortie: str):
         if n == 0:
             self.statut("Aucune page traitée.")
-            return messagebox.showinfo("PDF Studio", "Aucune page à traiter : toutes contiennent déjà du texte.\n"
+            return messagebox.showinfo("Pagilis", "Aucune page à traiter : toutes contiennent déjà du texte.\n"
                                                      "Décochez « Ignorer les pages qui ont déjà du texte » pour forcer.")
         self.encadrer_mots.set(True)
         self._apres_sauvegarde(sortie, self.continuer_ocr, f"OCR terminé sur {n} page(s).")
@@ -1171,17 +1180,17 @@ class PDFStudio(ctk.CTk):
 
 
 def desinstaller_avec_confirmation() -> None:
-    """« PDFStudio.exe --desinstaller », lancé par Windows (Applications installées)."""
+    """« Pagilis.exe --desinstaller », lancé par Windows (Applications installées)."""
     racine = ctk.CTk()
     racine.withdraw()
-    if messagebox.askyesno("Désinstaller PDF Studio",
-                           "Désinstaller PDF Studio de ce PC ?\n\n"
+    if messagebox.askyesno("Désinstaller Pagilis",
+                           "Désinstaller Pagilis de ce PC ?\n\n"
                            "Vos documents ne sont pas touchés. Vos préférences sont conservées.",
                            parent=racine):
         # Lancé depuis l'exe installé : son dossier n'est supprimé qu'après notre fermeture.
         depuis_installation = installation.tourne_depuis_installation()
         installation.desinstaller(attendre_pid=os.getpid() if depuis_installation else None)
-        messagebox.showinfo("PDF Studio", "PDF Studio a été désinstallé.", parent=racine)
+        messagebox.showinfo("Pagilis", "Pagilis a été désinstallé.", parent=racine)
     racine.destroy()
 
 
@@ -1195,17 +1204,48 @@ def main() -> None:
         sys.exit(1 if echecs else 0)
     if "--desinstaller" in arguments:
         return desinstaller_avec_confirmation()
+    if migrer_installation_pdf_studio(arguments):
+        return  # la version installée sous le nouveau nom a pris le relais
     ctk.set_appearance_mode("system")
     ctk.set_default_color_theme("blue")
-    app = PDFStudio()
+    app = Pagilis()
     if installation.tourne_depuis_installation():
         # Après une mise à jour automatique, la version affichée par Windows doit suivre.
         installation.mettre_a_jour_version(updater.APP_VERSION)
-    # « Ouvrir avec PDF Studio » ou PDF glissé sur l'exe : le chemin arrive en argument.
+    if "--renomme" in arguments:
+        app.after(800, lambda: messagebox.showinfo(
+            identite.NOM, f"{identite.ANCIEN_NOM} s'appelle désormais {identite.NOM}.\n\n"
+                          "Vos préférences sont conservées ; les raccourcis et l'entrée dans "
+                          "« Applications installées » portent le nouveau nom."))
+    # « Ouvrir avec Pagilis » ou PDF glissé sur l'exe : le chemin arrive en argument.
     fichiers = [a for a in arguments if a.lower().endswith(".pdf") and os.path.isfile(a)]
     if fichiers:
         app.after(200, lambda: app.charger_fichier(os.path.abspath(fichiers[0])))
     app.mainloop()
+
+
+def migrer_installation_pdf_studio(arguments: list[str]) -> bool:
+    """Installation de PDF Studio tout juste mise à jour : elle devient Pagilis.
+
+    L'exe mis à jour tourne encore depuis l'ancien dossier, sous l'ancien nom.
+    Il s'installe sous Pagilis (mêmes choix de raccourcis), retire l'ancienne
+    installation (dossier effacé après sa fermeture), puis lance la nouvelle
+    copie. Vrai si la migration a eu lieu ; en cas d'échec, l'application
+    démarre normalement depuis l'ancien emplacement et réessaiera au prochain
+    lancement.
+    """
+    if not installation.tourne_depuis_installation(installation.ancienne_installation()):
+        return False
+    try:
+        nouvel_exe = installation.migrer_depuis_pdf_studio(
+            updater.APP_VERSION, source=installation.exe_courant(), attendre_pid=os.getpid())
+        logging.info("Installation de %s migrée vers %s", identite.ANCIEN_NOM, nouvel_exe)
+        relance = [str(nouvel_exe), "--renomme"] + [a for a in arguments if a.lower().endswith(".pdf")]
+        subprocess.Popen(relance, env=updater.environnement_lancement(), close_fds=True)
+        return True
+    except Exception:  # noqa: BLE001 - une migration ratée ne doit pas empêcher de travailler
+        logging.exception("Migration de l'installation %s impossible", identite.ANCIEN_NOM)
+        return False
 
 
 if __name__ == "__main__":

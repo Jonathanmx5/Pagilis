@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Auto-vérification de l'exe : « PDFStudio.exe --verifier ».
+"""Auto-vérification de l'exe : « Pagilis.exe --verifier ».
 
 Fait tourner les vraies fonctions dans l'exe compilé (et non dans les sources) :
 un module oublié par PyInstaller, une DLL manquante ou des fichiers de langue

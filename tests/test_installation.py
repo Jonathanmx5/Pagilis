@@ -21,18 +21,18 @@ import installation as inst  # noqa: E402
 @pytest.fixture
 def emplacements(tmp_path):
     """Installation complète dans tmp_path, registre sous une clé de test jetable."""
-    racine = rf"Software\PDFStudioTests\{uuid.uuid4().hex}"
+    racine = rf"Software\PagilisTests\{uuid.uuid4().hex}"
     e = inst.Emplacements(
-        dossier=tmp_path / "Programs" / "PDF Studio",
+        dossier=tmp_path / "Programs" / "Pagilis",
         menu_demarrer=tmp_path / "Menu",
         bureau=tmp_path / "Bureau",
-        cle_desinstallation=rf"{racine}\Uninstall\PDFStudio",
+        cle_desinstallation=rf"{racine}\Uninstall\Pagilis",
         cle_classes=rf"{racine}\Classes",
     )
     yield e
     inst._supprimer_arborescence(racine)
     try:  # la clé parente commune, une fois vide
-        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\PDFStudioTests")
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, r"Software\PagilisTests")
     except OSError:
         pass  # pas vide (autre test en cours) ou déjà supprimée
 
@@ -41,7 +41,7 @@ def emplacements(tmp_path):
 def exe_portable(tmp_path):
     # Un VRAI exécutable : Windows refuse de créer un raccourci vers un faux exe.
     import shutil
-    chemin = tmp_path / "Téléchargements" / "PDFStudio.exe"  # accents : comme un vrai profil
+    chemin = tmp_path / "Téléchargements" / "Pagilis.exe"  # accents : comme un vrai profil
     chemin.parent.mkdir()
     shutil.copy2(sys.executable, chemin)
     return chemin
@@ -69,12 +69,12 @@ def test_install_copies_exe_creates_shortcuts_and_registers(emplacements, exe_po
     assert all(lien.exists() for lien in emplacements.raccourcis)
     # Inscription dans « Applications installées ».
     cle = emplacements.cle_desinstallation
-    assert lire(cle, "DisplayName") == "PDF Studio"
+    assert lire(cle, "DisplayName") == "Pagilis"
     assert lire(cle, "DisplayVersion") == "1.2.3"
     assert lire(cle, "UninstallString") == f'"{emplacements.exe}" --desinstaller'
     # « Ouvrir avec » pour les PDF.
-    assert lire(rf"{emplacements.cle_classes}\{inst.PROGID}\shell\open\command") == f'"{emplacements.exe}" "%1"'
-    assert lire(rf"{emplacements.cle_classes}\.pdf\OpenWithProgids", inst.PROGID) is None
+    assert lire(rf"{emplacements.cle_classes}\{emplacements.progid}\shell\open\command") == f'"{emplacements.exe}" "%1"'
+    assert lire(rf"{emplacements.cle_classes}\.pdf\OpenWithProgids", emplacements.progid) is None
 
 
 def test_shortcut_points_to_installed_exe(emplacements, exe_portable):
@@ -93,7 +93,7 @@ def test_options_off_and_reinstall(emplacements, exe_portable):
     # Réinstallation sans raccourci Bureau ni « Ouvrir avec » : on les retire.
     inst.installer(exe_portable, "1.0.1", raccourci_bureau=False, ouvrir_avec=False, emplacements=emplacements)
     assert emplacements.raccourcis[0].exists() and not emplacements.raccourcis[1].exists()
-    assert not cle_existe(rf"{emplacements.cle_classes}\{inst.PROGID}")
+    assert not cle_existe(rf"{emplacements.cle_classes}\{emplacements.progid}")
     assert lire(emplacements.cle_desinstallation, "DisplayVersion") == "1.0.1"
 
 
@@ -109,7 +109,7 @@ def test_uninstall_removes_everything(emplacements, exe_portable):
     assert not emplacements.dossier.exists()
     assert not any(lien.exists() for lien in emplacements.raccourcis)
     assert not cle_existe(emplacements.cle_desinstallation)
-    assert not cle_existe(rf"{emplacements.cle_classes}\{inst.PROGID}")
+    assert not cle_existe(rf"{emplacements.cle_classes}\{emplacements.progid}")
     assert exe_portable.exists()  # la version portable n'est pas touchée
 
 
@@ -136,3 +136,105 @@ def test_running_portable_is_not_the_installed_copy(emplacements, monkeypatch, e
     assert not inst.tourne_depuis_installation(emplacements)
     monkeypatch.setattr(sys, "executable", str(emplacements.exe))
     assert inst.tourne_depuis_installation(emplacements)
+
+
+# ------------------------------------------------- migration depuis PDF Studio
+
+
+@pytest.fixture
+def ancienne(emplacements):
+    """Installation de PDF Studio (nom d'avant), à côté de celle de Pagilis et dans la même zone de test."""
+    racine = emplacements.cle_desinstallation.rsplit("\\", 2)[0]
+    return inst.ancienne_installation(
+        dossier=emplacements.dossier.parent / "PDF Studio",
+        menu_demarrer=emplacements.menu_demarrer,
+        bureau=emplacements.bureau,
+        cle_desinstallation=rf"{racine}\Uninstall\PDFStudio",
+        cle_classes=emplacements.cle_classes,
+    )
+
+
+def test_legacy_layout_uses_old_names(ancienne):
+    assert ancienne.exe.name == "PDFStudio.exe"
+    assert [l.name for l in ancienne.raccourcis] == ["PDF Studio.lnk", "PDF Studio.lnk"]
+    assert ancienne.progid == "PDFStudio.pdf"
+
+
+@pytest.mark.parametrize("bureau, ouvrir_avec", [(True, True), (False, False)])
+def test_pdf_studio_install_becomes_pagilis(emplacements, ancienne, exe_portable, bureau, ouvrir_avec):
+    inst.installer(exe_portable, "1.1.0", raccourci_bureau=bureau, ouvrir_avec=ouvrir_avec, emplacements=ancienne)
+    assert ancienne.exe.exists()
+
+    nouveau = inst.migrer_depuis_pdf_studio("1.2.0", ancienne=ancienne, nouvelle=emplacements)
+
+    # Pagilis est installé, avec les MÊMES choix que PDF Studio.
+    assert nouveau == emplacements.exe and nouveau.exists()
+    assert emplacements.raccourcis[0].exists()
+    assert emplacements.raccourcis[1].exists() is bureau
+    assert lire(emplacements.cle_desinstallation, "DisplayName") == "Pagilis"
+    assert lire(emplacements.cle_desinstallation, "DisplayVersion") == "1.2.0"
+    assert cle_existe(rf"{emplacements.cle_classes}\Pagilis.pdf") is ouvrir_avec
+    # Plus aucune trace de PDF Studio.
+    assert not ancienne.dossier.exists()
+    assert not any(lien.exists() for lien in ancienne.raccourcis)
+    assert not cle_existe(ancienne.cle_desinstallation)
+    assert not cle_existe(rf"{ancienne.cle_classes}\PDFStudio.pdf")
+    assert not inst._ouvrir_avec_inscrit(ancienne)
+
+
+def test_no_pdf_studio_install_nothing_to_migrate(emplacements, ancienne):
+    assert inst.migrer_depuis_pdf_studio("1.2.0", ancienne=ancienne, nouvelle=emplacements) is None
+    assert not emplacements.exe.exists()
+
+
+def test_preferences_carried_over_once(tmp_path):
+    ancien, nouveau = tmp_path / "PDFStudio", tmp_path / "Pagilis"
+    ancien.mkdir()
+    (ancien / "config.json").write_text('{"apparence": "dark"}', encoding="utf-8")
+    assert inst.reprendre_preferences(ancien, nouveau) is True
+    assert (nouveau / "config.json").read_text(encoding="utf-8") == '{"apparence": "dark"}'
+    # Pagilis a désormais ses propres préférences : on n'y touche plus.
+    (nouveau / "config.json").write_text('{"apparence": "light"}', encoding="utf-8")
+    assert inst.reprendre_preferences(ancien, nouveau) is False
+    assert "light" in (nouveau / "config.json").read_text(encoding="utf-8")
+
+
+def test_nothing_to_carry_over(tmp_path):
+    assert inst.reprendre_preferences(tmp_path / "absent", tmp_path / "Pagilis") is False
+
+
+def test_startup_migrates_updated_pdf_studio_and_relaunches(monkeypatch, tmp_path):
+    """Au démarrage, un PDF Studio installé et tout juste mis à jour devient Pagilis et passe la main."""
+    import pagilis
+    appels, lances = {}, []
+    monkeypatch.setattr(inst, "tourne_depuis_installation", lambda e=None: e is not None and e.nom == "PDF Studio")
+    monkeypatch.setattr(inst, "exe_courant", lambda: tmp_path / "PDFStudio.exe")
+
+    def migrer(version, source=None, attendre_pid=None, **k):
+        appels.update(version=version, source=source, attendre_pid=attendre_pid)
+        return tmp_path / "Pagilis" / "Pagilis.exe"
+
+    monkeypatch.setattr(inst, "migrer_depuis_pdf_studio", migrer)
+    monkeypatch.setattr(pagilis.subprocess, "Popen", lambda args, **k: lances.append(args))
+    assert pagilis.migrer_installation_pdf_studio(["contrat.pdf"]) is True
+    assert appels["attendre_pid"] == os.getpid(), "l'ancien dossier ne doit partir qu'après notre fermeture"
+    assert appels["source"] == tmp_path / "PDFStudio.exe"
+    assert lances == [[str(tmp_path / "Pagilis" / "Pagilis.exe"), "--renomme", "contrat.pdf"]]
+
+
+def test_startup_does_nothing_outside_pdf_studio_install(monkeypatch):
+    import pagilis
+    monkeypatch.setattr(inst, "tourne_depuis_installation", lambda e=None: False)
+    assert pagilis.migrer_installation_pdf_studio([]) is False
+
+
+def test_failed_migration_does_not_block_the_app(monkeypatch):
+    import pagilis
+    monkeypatch.setattr(inst, "tourne_depuis_installation", lambda e=None: e is not None)
+    monkeypatch.setattr(inst, "exe_courant", lambda: None)
+
+    def echec(*a, **k):
+        raise PermissionError("fichier verrouillé")
+
+    monkeypatch.setattr(inst, "migrer_depuis_pdf_studio", echec)
+    assert pagilis.migrer_installation_pdf_studio([]) is False

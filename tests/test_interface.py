@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Tests de l'interface : la vraie fenêtre PDF Studio, pilotée par programme.
+"""Tests de l'interface : la vraie fenêtre Pagilis, pilotée par programme.
 
 Chaque test est un scénario (générateur) exécuté DANS mainloop() : les
 traitements en arrière-plan rendent la main à l'interface par after(), qui
@@ -45,7 +45,7 @@ class Dialogues:
 @pytest.fixture
 def ui(monkeypatch, tmp_path):
     """Crée l'application avec des dialogues simulés ; fournit (créer_app, dialogues)."""
-    import pdf_studio as s
+    import pagilis as s
     d = Dialogues()
     monkeypatch.setattr(s, "sauver_config", lambda c: None)
     monkeypatch.setattr(s, "charger_config", lambda: {})
@@ -65,7 +65,7 @@ def ui(monkeypatch, tmp_path):
     applis = []
 
     def creer():
-        app = s.PDFStudio()
+        app = s.Pagilis()
         app.geometry("1280x780+0+0")
         applis.append(app)
         return app
@@ -342,7 +342,7 @@ def test_business_error_is_shown_not_crashing(ui, contrat, tmp_path):
         app.lancer_division()
         yield TRAVAUX
         yield 100
-        assert ("showwarning", "PDF Studio", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
+        assert ("showwarning", "Pagilis", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
 
     executer(app, scenario)
 
@@ -382,7 +382,7 @@ def test_ocr_from_interface_frames_words(ui, tmp_path):
 ])
 def test_install_button_only_in_portable_mode(ui, monkeypatch, portable, installe, attendu):
     s, creer, d = ui
-    monkeypatch.setattr(installation, "exe_courant", lambda: "PDFStudio.exe" if portable else None)
+    monkeypatch.setattr(installation, "exe_courant", lambda: "Pagilis.exe" if portable else None)
     monkeypatch.setattr(installation, "tourne_depuis_installation", lambda *a: False)
     monkeypatch.setattr(installation, "est_installe", lambda *a: installe)
     app = creer()
@@ -407,7 +407,7 @@ def test_update_popup_offers_and_can_skip_version(ui, monkeypatch):
     app = creer()
 
     def scenario():
-        app._popup_mise_a_jour(updater.Update("9.9.9", "https://exemple/PDFStudio.exe", None, "Nouveautés"))
+        app._popup_mise_a_jour(updater.Update("9.9.9", "https://exemple/Pagilis.exe", None, "Nouveautés"))
         yield 300
         popup = [w for w in app.winfo_children() if isinstance(w, s.ctk.CTkToplevel)][-1]
         cases = [w for w in popup.winfo_children() if isinstance(w, s.ctk.CTkCheckBox)]

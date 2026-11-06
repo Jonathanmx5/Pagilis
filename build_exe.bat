@@ -1,5 +1,5 @@
 @echo off
-rem Construit dist\PDFStudio.exe : installe les dependances (versions figees),
+rem Construit dist\Pagilis.exe : installe les dependances (versions figees),
 rem recupere les fichiers de langue Tesseract si absents, verifie le code
 rem (analyse + tests) puis lance PyInstaller. Utilise tel quel par la CI GitHub.
 setlocal
@@ -19,27 +19,27 @@ if not exist "tessdata\eng.traineddata" (
 )
 
 echo [3/5] Analyse du code et tests automatises...
-python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py installation.py verification.py publication.py tests || goto :erreur
+python -m pyflakes pdf_core.py pagilis.py apercu.py updater.py installation.py verification.py publication.py identite.py tests || goto :erreur
 python -m pytest tests -q || goto :erreur
 
 echo [4/5] Compilation PyInstaller...
 rem LICENSE est embarquee dans l'exe : l'AGPL impose de fournir la licence avec chaque copie.
 rem Les --exclude-module retirent des dependances de PyMuPDF 2.x jamais chargees par
 rem l'application (numpy, onnxruntime...) : l'exe s'allege, et --verifier le controle.
-python -m PyInstaller --onefile --noconsole --noconfirm --name PDFStudio ^
+python -m PyInstaller --onefile --noconsole --noconfirm --name Pagilis ^
     --collect-all customtkinter --add-data "tessdata;tessdata" --add-data "LICENSE;." ^
     --exclude-module numpy --exclude-module onnxruntime --exclude-module networkx ^
     --exclude-module pymupdf4llm --exclude-module pymupdf_layout --exclude-module yaml ^
     --exclude-module tabulate --exclude-module psutil ^
-    pdf_studio.py || goto :erreur
+    pagilis.py || goto :erreur
 
 echo.
 echo [5/5] Auto-verification de l'exe compile...
 rem "start /wait" rend le code de sortie de l'exe, mais seul "if errorlevel" le voit
 rem (un "|| goto" ne se declencherait jamais : verifie).
-start "" /wait dist\PDFStudio.exe --verifier
+start "" /wait dist\Pagilis.exe --verifier
 if errorlevel 1 goto :erreur
-echo Termine : dist\PDFStudio.exe
+echo Termine : dist\Pagilis.exe
 endlocal
 exit /b 0
 

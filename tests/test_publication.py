@@ -43,19 +43,19 @@ def test_missing_section_refuses_to_publish():
 def test_real_changelog_has_notes_for_current_version():
     """Garde-fou : la version du code a bien ses notes dans CHANGELOG.md."""
     changelog = (Path(__file__).parent.parent / "CHANGELOG.md").read_text(encoding="utf-8")
-    for version in ("1.0.0", "1.0.1", "1.0.2", "1.1.0"):
+    for version in ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.2.0"):
         assert publication.notes_de_version(changelog, version)
 
 
 def test_main_writes_manifest_read_by_the_updater(tmp_path, monkeypatch):
-    exe = tmp_path / "PDFStudio.exe"
+    exe = tmp_path / "Pagilis.exe"
     exe.write_bytes(b"MZ exe")
     (tmp_path / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    assert publication.main(["1.2.0-beta.1", "moi/PDFStudio", str(exe), str(tmp_path / "dist")]) == 0
+    assert publication.main(["1.2.0-beta.1", "moi/Pagilis", str(exe), str(tmp_path / "dist")]) == 0
     contenu = json.loads((tmp_path / "dist" / "version.json").read_text(encoding="utf-8"))
     assert contenu["prerelease"] is True
-    assert contenu["url"].endswith("/v1.2.0-beta.1/PDFStudio.exe")
+    assert contenu["url"].endswith("/v1.2.0-beta.1/Pagilis.exe")
     # Le fichier produit est bien compris par l'application installée.
     maj = updater.check_for_update("x", "1.1.0", lambda _url: contenu)
     assert maj.version == "1.2.0-beta.1" and "Nouveauté A" in maj.notes

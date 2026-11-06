@@ -351,7 +351,7 @@ def test_ocr_skipped_without_tessdata(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "find_tessdata", lambda *_a, **_k: None)
     src = make_pdf(tmp_path / "src.pdf")
     doc = fitz.open(src)
-    with pytest.raises(core.PdfStudioError, match="Tesseract"):
+    with pytest.raises(core.PagilisError, match="Tesseract"):
         core.ocr_pages(doc, [0])
     doc.close()
 

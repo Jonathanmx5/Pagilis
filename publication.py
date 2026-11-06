@@ -36,7 +36,7 @@ def notes_de_version(changelog: str, version: str) -> str:
 def manifeste(version: str, depot: str, exe: Path, notes: str) -> dict:
     return {
         "version": version,
-        "url": f"https://github.com/{depot}/releases/download/v{version}/PDFStudio.exe",
+        "url": f"https://github.com/{depot}/releases/download/v{version}/Pagilis.exe",
         "sha256": hashlib.sha256(exe.read_bytes()).hexdigest(),
         "notes": notes,
         "prerelease": "-" in version,

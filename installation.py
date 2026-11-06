@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Installation de PDF Studio sur le PC à partir de l'exe portable.
+"""Installation de Pagilis sur le PC à partir de l'exe portable.
 
 L'exe fonctionne sans installation (clé USB, dossier Téléchargements). Une fois
 lancé, il peut s'installer pour l'utilisateur courant, SANS droits
 administrateur, comme le font la plupart des applications récentes :
 
-- copie de l'exe dans %LOCALAPPDATA%\\Programs\\PDF Studio ;
+- copie de l'exe dans %LOCALAPPDATA%\\Programs\\Pagilis ;
 - raccourcis dans le menu Démarrer et, au choix, sur le Bureau ;
 - inscription dans « Applications installées » de Windows (désinstallation) ;
-- au choix, PDF Studio proposé dans « Ouvrir avec » pour les PDF (sans
+- au choix, Pagilis proposé dans « Ouvrir avec » pour les PDF (sans
   remplacer le lecteur PDF par défaut).
 
 Aucune interface ici. Les emplacements sont des paramètres : les tests
@@ -27,13 +27,10 @@ import winreg
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import identite
 from updater import ATTENTE_PROCESSUS
 
-NOM = "PDF Studio"
-NOM_EXE = "PDFStudio.exe"
-EDITEUR = "Jonathanmx5"
-PROGID = "PDFStudio.pdf"
-CLE_DESINSTALLATION = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\PDFStudio"
+CLE_DESINSTALLATIONS = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 CLE_CLASSES = r"Software\Classes"
 
 
@@ -49,22 +46,38 @@ def _dossier_shell(nom: str, repli: Path) -> Path:
 
 @dataclass
 class Emplacements:
-    """Où installer. Les valeurs par défaut sont les vrais emplacements Windows."""
+    """Où et sous quel nom installer. Les valeurs par défaut sont les vrais
+    emplacements Windows de Pagilis ; `ancienne_installation()` décrit ceux de
+    PDF Studio (le nom d'avant), pour la migration."""
 
-    dossier: Path = field(default_factory=lambda: Path(os.environ["LOCALAPPDATA"]) / "Programs" / NOM)
+    dossier: Path = field(default_factory=lambda: Path(os.environ["LOCALAPPDATA"]) / "Programs" / identite.NOM)
     menu_demarrer: Path = field(default_factory=lambda: _dossier_shell(
         "Programs", Path(os.environ["APPDATA"]) / r"Microsoft\Windows\Start Menu\Programs"))
     bureau: Path = field(default_factory=lambda: _dossier_shell("Desktop", Path.home() / "Desktop"))
-    cle_desinstallation: str = CLE_DESINSTALLATION
+    cle_desinstallation: str = rf"{CLE_DESINSTALLATIONS}\{identite.CLE_REGISTRE}"
     cle_classes: str = CLE_CLASSES
+    nom: str = identite.NOM
+    nom_exe: str = identite.NOM_EXE
+    progid: str = identite.PROGID_PDF
 
     @property
     def exe(self) -> Path:
-        return self.dossier / NOM_EXE
+        return self.dossier / self.nom_exe
 
     @property
     def raccourcis(self) -> list[Path]:
-        return [self.menu_demarrer / f"{NOM}.lnk", self.bureau / f"{NOM}.lnk"]
+        return [self.menu_demarrer / f"{self.nom}.lnk", self.bureau / f"{self.nom}.lnk"]
+
+
+def ancienne_installation(**autres) -> Emplacements:
+    """Emplacements d'une installation de PDF Studio (avant le renommage en Pagilis)."""
+    valeurs = dict(
+        dossier=Path(os.environ["LOCALAPPDATA"]) / "Programs" / identite.ANCIEN_NOM,
+        cle_desinstallation=rf"{CLE_DESINSTALLATIONS}\{identite.ANCIENNE_CLE_REGISTRE}",
+        nom=identite.ANCIEN_NOM, nom_exe=identite.ANCIEN_NOM_EXE, progid=identite.ANCIEN_PROGID_PDF,
+    )
+    valeurs.update(autres)
+    return Emplacements(**valeurs)
 
 
 def exe_courant() -> Path | None:
@@ -73,7 +86,7 @@ def exe_courant() -> Path | None:
 
 
 def est_installe(emplacements: Emplacements | None = None) -> bool:
-    """Vrai si PDF Studio est installé (l'exe est à sa place)."""
+    """Vrai si Pagilis est installé (l'exe est à sa place)."""
     return (emplacements or Emplacements()).exe.exists()
 
 
@@ -106,9 +119,9 @@ def installer(
         shutil.copy2(source, temporaire)
         os.replace(temporaire, e.exe)
 
-    _creer_raccourci(e.raccourcis[0], e.exe)
+    _creer_raccourci(e.raccourcis[0], e.exe, e.nom)
     if raccourci_bureau:
-        _creer_raccourci(e.raccourcis[1], e.exe)
+        _creer_raccourci(e.raccourcis[1], e.exe, e.nom)
     elif e.raccourcis[1].exists():
         e.raccourcis[1].unlink()
 
@@ -131,16 +144,16 @@ def mettre_a_jour_version(version: str, emplacements: Emplacements | None = None
         pass  # pas installé : rien à faire
 
 
-def _creer_raccourci(lien: Path, cible: Path) -> None:
+def _creer_raccourci(lien: Path, cible: Path, nom: str = identite.NOM) -> None:
     """Crée un raccourci .lnk via l'objet COM WScript.Shell (aucune dépendance)."""
     lien.parent.mkdir(parents=True, exist_ok=True)
     script = (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:PDFS_LIEN); "
         "$s.TargetPath = $env:PDFS_CIBLE; $s.WorkingDirectory = $env:PDFS_DOSSIER; "
-        "$s.IconLocation = $env:PDFS_CIBLE + ',0'; $s.Description = 'PDF Studio'; $s.Save()"
+        "$s.IconLocation = $env:PDFS_CIBLE + ',0'; $s.Description = $env:PDFS_NOM; $s.Save()"
     )
     # Chemins passés par variables d'environnement : aucun souci de guillemets ni d'accents.
-    env = dict(os.environ, PDFS_LIEN=str(lien), PDFS_CIBLE=str(cible), PDFS_DOSSIER=str(cible.parent))
+    env = dict(os.environ, PDFS_LIEN=str(lien), PDFS_CIBLE=str(cible), PDFS_DOSSIER=str(cible.parent), PDFS_NOM=nom)
     resultat = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                               env=env, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
     if resultat.returncode:
@@ -151,13 +164,13 @@ def _creer_raccourci(lien: Path, cible: Path) -> None:
 def _inscrire_desinstallation(e: Emplacements, version: str) -> None:
     taille_ko = e.exe.stat().st_size // 1024
     valeurs = {
-        "DisplayName": NOM,
+        "DisplayName": e.nom,
         "DisplayVersion": version,
-        "Publisher": EDITEUR,
+        "Publisher": identite.EDITEUR,
         "DisplayIcon": f"{e.exe},0",
         "InstallLocation": str(e.dossier),
         "UninstallString": f'"{e.exe}" --desinstaller',
-        "URLInfoAbout": "https://github.com/Jonathanmx5/PDFStudio",
+        "URLInfoAbout": f"https://github.com/{identite.DEPOT_GITHUB}",
     }
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, e.cle_desinstallation) as cle:
         for nom, valeur in valeurs.items():
@@ -168,15 +181,15 @@ def _inscrire_desinstallation(e: Emplacements, version: str) -> None:
 
 
 def _inscrire_ouvrir_avec(e: Emplacements) -> None:
-    """Ajoute PDF Studio à « Ouvrir avec » pour les .pdf, sans devenir l'application par défaut."""
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{PROGID}") as cle:
-        winreg.SetValueEx(cle, "", 0, winreg.REG_SZ, "Document PDF (PDF Studio)")
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{PROGID}\DefaultIcon") as cle:
+    """Ajoute Pagilis à « Ouvrir avec » pour les .pdf, sans devenir l'application par défaut."""
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{e.progid}") as cle:
+        winreg.SetValueEx(cle, "", 0, winreg.REG_SZ, f"Document PDF ({e.nom})")
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{e.progid}\DefaultIcon") as cle:
         winreg.SetValueEx(cle, "", 0, winreg.REG_SZ, f"{e.exe},0")
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{PROGID}\shell\open\command") as cle:
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{e.progid}\shell\open\command") as cle:
         winreg.SetValueEx(cle, "", 0, winreg.REG_SZ, f'"{e.exe}" "%1"')
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\.pdf\OpenWithProgids") as cle:
-        winreg.SetValueEx(cle, PROGID, 0, winreg.REG_NONE, b"")
+        winreg.SetValueEx(cle, e.progid, 0, winreg.REG_NONE, b"")
     _prevenir_explorateur()
 
 
@@ -184,10 +197,10 @@ def _retirer_ouvrir_avec(e: Emplacements) -> None:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\.pdf\OpenWithProgids",
                             0, winreg.KEY_SET_VALUE) as cle:
-            winreg.DeleteValue(cle, PROGID)
+            winreg.DeleteValue(cle, e.progid)
     except OSError:
         pass
-    _supprimer_arborescence(rf"{e.cle_classes}\{PROGID}")
+    _supprimer_arborescence(rf"{e.cle_classes}\{e.progid}")
     _prevenir_explorateur()
 
 
@@ -220,7 +233,7 @@ def _prevenir_explorateur() -> None:
 def desinstaller(emplacements: Emplacements | None = None, attendre_pid: int | None = None) -> None:
     """Retire raccourcis, inscriptions et dossier d'installation.
 
-    Les préférences et le journal (%LOCALAPPDATA%\\PDFStudio) sont conservés,
+    Les préférences et le journal (%LOCALAPPDATA%\\Pagilis) sont conservés,
     comme le font la plupart des applications. Si `attendre_pid` est donné
     (désinstallation lancée depuis l'exe installé lui-même), le dossier est
     supprimé par un script qui attend la fin de ce processus : Windows
@@ -235,7 +248,7 @@ def desinstaller(emplacements: Emplacements | None = None, attendre_pid: int | N
     if attendre_pid is None:
         shutil.rmtree(e.dossier, ignore_errors=True)
         return
-    script = Path(tempfile.gettempdir()) / "pdfstudio_desinstallation.bat"
+    script = Path(tempfile.gettempdir()) / "pagilis_desinstallation.bat"
     script.write_text(
         "@echo off\r\n"
         "chcp 65001 >nul\r\n"  # chemins en UTF-8 (nom d'utilisateur accentué)
@@ -247,3 +260,54 @@ def desinstaller(emplacements: Emplacements | None = None, attendre_pid: int | N
         encoding="utf-8",
     )
     subprocess.Popen(["cmd", "/c", str(script)], creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+# ------------------------------------------------- migration depuis PDF Studio
+
+
+def _ouvrir_avec_inscrit(e: Emplacements) -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\.pdf\OpenWithProgids") as cle:
+            winreg.QueryValueEx(cle, e.progid)
+            return True
+    except OSError:
+        return False
+
+
+def migrer_depuis_pdf_studio(
+    version: str,
+    source: Path | None = None,
+    ancienne: Emplacements | None = None,
+    nouvelle: Emplacements | None = None,
+    attendre_pid: int | None = None,
+) -> Path | None:
+    """Transforme une installation de PDF Studio en installation de Pagilis.
+
+    Reprend les choix faits à l'installation (raccourci Bureau, « Ouvrir avec »),
+    installe Pagilis à sa place, puis retire tout ce que PDF Studio avait laissé
+    (dossier, raccourcis, entrées du registre). `source` est l'exe à installer
+    (par défaut celui de l'ancienne installation, déjà mis à jour) ; si c'est
+    l'exe en cours, passer `attendre_pid` pour que l'ancien dossier ne soit
+    effacé qu'après sa fermeture. Retourne le nouvel exe, ou None s'il n'y
+    avait aucune installation de PDF Studio.
+    """
+    a = ancienne or ancienne_installation()
+    if not a.exe.exists():
+        return None
+    installe = installer(source or a.exe, version, raccourci_bureau=a.raccourcis[1].exists(),
+                         ouvrir_avec=_ouvrir_avec_inscrit(a), emplacements=nouvelle)
+    desinstaller(a, attendre_pid=attendre_pid)
+    return installe
+
+
+def reprendre_preferences(ancien_dossier: Path, nouveau_dossier: Path) -> bool:
+    """Copie les préférences de PDF Studio vers Pagilis, une seule fois.
+
+    Ne touche à rien si Pagilis a déjà ses propres préférences.
+    """
+    ancien, nouveau = Path(ancien_dossier) / "config.json", Path(nouveau_dossier) / "config.json"
+    if nouveau.exists() or not ancien.exists():
+        return False
+    nouveau.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ancien, nouveau)
+    return True

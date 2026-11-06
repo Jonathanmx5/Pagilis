@@ -100,7 +100,7 @@ def _jouer_script(contenu, dossier):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="script .bat Windows")
 def test_replacement_script_swaps_and_keeps_backup(tmp_path):
-    actuel = _exe_factice(tmp_path, "PDFStudio.exe", "whoami.exe")
+    actuel = _exe_factice(tmp_path, "Pagilis.exe", "whoami.exe")
     nouveau = _exe_factice(tmp_path, "nouveau.exe", "hostname.exe")
     octets_avant, octets_nouveau = actuel.read_bytes(), nouveau.read_bytes()
     sauvegarde = tmp_path / "sauvegarde.exe"
@@ -114,7 +114,7 @@ def test_replacement_script_swaps_and_keeps_backup(tmp_path):
 def test_replacement_script_gives_up_and_restores(tmp_path):
     """Remplacement impossible : abandon après N essais, ancienne version intacte."""
     import time
-    actuel = _exe_factice(tmp_path, "PDFStudio.exe", "whoami.exe")
+    actuel = _exe_factice(tmp_path, "Pagilis.exe", "whoami.exe")
     octets_avant = actuel.read_bytes()
     introuvable = tmp_path / "telechargement-disparu.exe"
     debut = time.time()
@@ -127,7 +127,7 @@ def test_replacement_script_gives_up_and_restores(tmp_path):
 @pytest.mark.skipif(sys.platform != "win32", reason="exe Windows")
 def test_new_version_refused_if_self_check_fails(tmp_path):
     """Un exe qui ne réussit pas « --verifier » ne doit jamais être installé."""
-    pas_pdfstudio = _exe_factice(tmp_path, "PDFStudio_new.exe", "whoami.exe")
+    pas_pdfstudio = _exe_factice(tmp_path, "Pagilis_new.exe", "whoami.exe")
     assert updater.verifier_exe(str(pas_pdfstudio), delai=30) is False
     assert updater.verifier_exe(str(tmp_path / "absent.exe")) is False
 
@@ -137,14 +137,14 @@ def test_no_url_means_no_check():
 
 
 def test_up_to_date_returns_none():
-    manifeste = {"version": "1.0.0", "url": "https://x/PDFStudio.exe"}
+    manifeste = {"version": "1.0.0", "url": "https://x/Pagilis.exe"}
     assert updater.check_for_update("https://x/v.json", "1.0.0", fake_fetch(manifeste)) is None
 
 
 def test_newer_version_returns_update():
-    manifeste = {"version": "1.1.0", "url": "https://x/PDFStudio.exe", "sha256": "abc"}
+    manifeste = {"version": "1.1.0", "url": "https://x/Pagilis.exe", "sha256": "abc"}
     maj = updater.check_for_update("https://x/v.json", "1.0.0", fake_fetch(manifeste))
-    assert maj == updater.Update(version="1.1.0", url="https://x/PDFStudio.exe", sha256="abc")
+    assert maj == updater.Update(version="1.1.0", url="https://x/Pagilis.exe", sha256="abc")
 
 
 def test_network_error_is_silent():

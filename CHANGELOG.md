@@ -1,4 +1,4 @@
-# Nouveautés de PDF Studio
+# Nouveautés de Pagilis (anciennement PDF Studio)
 
 Chaque version publiée a sa section ci-dessous : la CI refuse de publier une
 version qui n'en a pas, et son contenu s'affiche dans la fenêtre de mise à jour.
@@ -10,6 +10,13 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
+
+## [1.2.0]
+
+- PDF Studio s'appelle désormais Pagilis.
+- Si PDF Studio est installé sur votre PC, il devient automatiquement Pagilis :
+  nouveaux raccourcis et nouvelle entrée dans « Applications installées »,
+  l'ancienne installation est retirée. Vos préférences sont conservées.
 
 ## [1.1.0]
 

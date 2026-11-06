@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Cœur de PDF Studio : toute la logique PDF, sans aucun import d'interface.
+"""Cœur de Pagilis : toute la logique PDF, sans aucun import d'interface.
 
 Conventions :
 - les PDF sont ouverts en mémoire, donc aucun fichier n'est verrouillé ;
@@ -40,15 +40,15 @@ POLICES = {
 }
 
 
-class PdfStudioError(Exception):
+class PagilisError(Exception):
     """Erreur générale du cœur, message destiné à l'utilisateur."""
 
 
-class PageRangeError(PdfStudioError):
+class PageRangeError(PagilisError):
     """Plage de pages invalide."""
 
 
-class PasswordRequired(PdfStudioError):
+class PasswordRequired(PagilisError):
     """Le PDF est chiffré et aucun mot de passe valable n'a été fourni."""
 
     def __init__(self, path: str):
@@ -148,7 +148,7 @@ def merge_pdfs(paths: list[str], output: str, progress: Progress = None) -> None
     du fichier.
     """
     if not paths:
-        raise PdfStudioError("Aucun fichier à fusionner.")
+        raise PagilisError("Aucun fichier à fusionner.")
     out = fitz.open()
     toc: list[list] = []
     n = len(paths)
@@ -192,7 +192,7 @@ def split_by_page(path: str, out_dir: str, progress: Progress = None) -> list[st
 def split_every_n(path: str, out_dir: str, n_pages: int, progress: Progress = None) -> list[str]:
     """Un fichier toutes les N pages."""
     if n_pages < 1:
-        raise PdfStudioError("Le nombre de pages doit être au moins 1.")
+        raise PagilisError("Le nombre de pages doit être au moins 1.")
     src = open_pdf(path)
     base = os.path.splitext(os.path.basename(path))[0]
     result = []
@@ -550,7 +550,7 @@ def replace_text(
     même ligne sont réécrits à l'identique ; les lignes voisines ne sont pas touchées.
     """
     if not old:
-        raise PdfStudioError("Le texte à remplacer est vide.")
+        raise PagilisError("Le texte à remplacer est vide.")
     pages = list(pages)
     total = 0
     for k, idx in enumerate(pages):
@@ -676,7 +676,7 @@ def ocr_pages(
     """
     dossier = find_tessdata(tessdata)
     if dossier is None:
-        raise PdfStudioError("Fichiers de langue Tesseract introuvables (.traineddata).")
+        raise PagilisError("Fichiers de langue Tesseract introuvables (.traineddata).")
     pages = list(pages)
     traitees = 0
     for k, idx in enumerate(pages):

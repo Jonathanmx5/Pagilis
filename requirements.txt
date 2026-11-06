@@ -1,4 +1,4 @@
-# Dépendances de PDF Studio, versions figées pour des compilations reproductibles.
+# Dépendances de Pagilis, versions figées pour des compilations reproductibles.
 # Mettre à jour volontairement (puis lancer les tests), jamais au hasard d'un build.
 pymupdf==2.1
 customtkinter==6.0.0

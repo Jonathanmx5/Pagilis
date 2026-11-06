@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Vérification et installation des mises à jour de PDF Studio.
+"""Vérification et installation des mises à jour de Pagilis.
 
 Aucune interface ici : le module est testable sans écran.
 
 Chaque release GitHub contient un petit fichier JSON, par exemple :
-    {"version": "1.2.0", "url": "https://.../PDFStudio.exe", "sha256": "...",
+    {"version": "1.2.0", "url": "https://.../Pagilis.exe", "sha256": "...",
      "notes": "- Nouveauté…"}
 
 Deux canaux :
@@ -30,12 +30,14 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import identite
+
 # Version EN COURS DE DÉVELOPPEMENT (doit avoir sa section dans CHANGELOG.md).
 # À la publication, la CI la remplace par celle du tag git (v1.2.3 -> "1.2.3").
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 # Dépôt GitHub qui héberge les versions publiées (voir .github/workflows/release.yml).
-GITHUB_REPO = "Jonathanmx5/PDFStudio"
+GITHUB_REPO = identite.DEPOT_GITHUB
 
 # Fichier de version joint à la DERNIÈRE release GitHub (GitHub n'y range jamais
 # une bêta). Vide = pas de vérification.
@@ -46,7 +48,7 @@ RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_pag
 
 # Sauvegarde de la version remplacée par la dernière mise à jour.
 DOSSIER_SAUVEGARDE = os.path.join(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
-                                  "PDFStudio", "version-precedente")
+                                  identite.DOSSIER_DONNEES, "version-precedente")
 
 TIMEOUT_SECONDES = 10
 
@@ -108,7 +110,7 @@ def notes_lisibles(notes: str) -> str:
 
 def _lire_json(url: str):
     requete = urllib.request.Request(url, headers={
-        "User-Agent": "PDFStudio-mise-a-jour",  # exigé par l'API GitHub
+        "User-Agent": "Pagilis-mise-a-jour",  # exigé par l'API GitHub
         "Accept": "application/json",
     })
     with urllib.request.urlopen(requete, timeout=TIMEOUT_SECONDES) as reponse:
@@ -261,16 +263,16 @@ def install_and_restart(new_exe: str) -> None:
         logging.info("Mode développement : installation de la mise à jour ignorée.")
         return
     os.makedirs(DOSSIER_SAUVEGARDE, exist_ok=True)
-    script = os.path.join(tempfile.gettempdir(), "pdfstudio_update.bat")
+    script = os.path.join(tempfile.gettempdir(), "pagilis_update.bat")
     with open(script, "w", encoding="utf-8") as fh:
         fh.write(script_remplacement(new_exe, sys.executable, os.getpid(),
-                                     os.path.join(DOSSIER_SAUVEGARDE, "PDFStudio.exe")))
+                                     os.path.join(DOSSIER_SAUVEGARDE, "Pagilis.exe")))
     subprocess.Popen(["cmd", "/c", script], env=environnement_lancement(),
                      creationflags=subprocess.CREATE_NO_WINDOW)
 
 
 def environnement_lancement() -> dict:
-    """Environnement pour lancer un AUTRE exe PDF Studio depuis celui-ci.
+    """Environnement pour lancer un AUTRE exe Pagilis depuis celui-ci.
 
     Sans PYINSTALLER_RESET_ENVIRONMENT, le nouvel exe hériterait des variables
     internes de PyInstaller et pourrait réutiliser notre dossier temporaire,
