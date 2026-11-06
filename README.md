@@ -71,7 +71,9 @@ dans un nouveau PDF. Les changements s'annulent et s'enregistrent avec ceux de
   protégé est enregistré sans mot de passe ; un Word protégé par mot de passe
   ne s'ouvre pas ; le résultat d'un Word est un PDF, pas un Word.
 - Un .exe non signé peut être signalé par Windows Defender.
-- Journal d'erreurs : `%LOCALAPPDATA%\Pagilis\pagilis.log`.
+- Journal d'erreurs : `%LOCALAPPDATA%\Pagilis\pagilis.log` (limité à 4 Mo, en 4 fichiers).
+- Annulation : 20 retouches au plus, et 300 Mo de mémoire au plus (moins d'étapes
+  sur un très gros fichier).
 
 ## Développer
 

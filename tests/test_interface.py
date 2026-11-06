@@ -1164,3 +1164,107 @@ def test_command_line_opens_pdf_and_word():
     arguments = ["--renomme", r"C:\x\a.pdf", r"C:\x\b.docx", r"C:\x\c.txt"]
     assert s.fichiers_a_ouvrir(arguments, existe=lambda c: True) == [r"C:\x\a.pdf", r"C:\x\b.docx"]
     assert s.fichiers_a_ouvrir(arguments, existe=lambda c: False) == []
+
+
+# ------------------------------------------- fenêtres d'installation et de mise à jour
+
+
+def toplevels(app):
+    return [w for w in app.winfo_children() if isinstance(w, s_ctk().CTkToplevel)]
+
+
+def s_ctk():
+    import customtkinter
+    return customtkinter
+
+
+def descendants(widget):
+    for enfant in widget.winfo_children():
+        yield enfant
+        yield from descendants(enfant)
+
+
+def bouton_nomme(fenetre, texte):
+    return next(w for w in descendants(fenetre) if isinstance(w, s_ctk().CTkButton) and w.cget("text") == texte)
+
+
+def test_install_window_installs_and_offers_to_switch(ui, monkeypatch, tmp_path):
+    import fenetres
+    s, creer, d = ui
+    app = creer()
+    appels = []
+    monkeypatch.setattr(installation, "exe_courant", lambda: tmp_path / "Pagilis.exe")
+    monkeypatch.setattr(installation, "installer", lambda *a, **k: appels.append(k) or tmp_path / "installe.exe")
+    monkeypatch.setattr(installation, "ancienne_installation",
+                        lambda: installation.Emplacements(dossier=tmp_path / "rien"))
+
+    def scenario():
+        fenetres.proposer_installation(app)
+        yield 200
+        fenetre = toplevels(app)[-1]
+        d.oui_non = False  # « Fermer cette version portable ? » : non
+        bouton_nomme(fenetre, "Installer").invoke()
+        yield 100
+        assert appels == [{"raccourci_bureau": True, "ouvrir_avec": True}]
+        assert not fenetre.winfo_exists()
+        assert app.winfo_exists()  # la version portable reste ouverte
+
+    executer(app, scenario)
+
+
+def test_install_window_reports_locked_installed_copy(ui, monkeypatch, tmp_path):
+    import fenetres
+    s, creer, d = ui
+    app = creer()
+    monkeypatch.setattr(installation, "exe_courant", lambda: tmp_path / "Pagilis.exe")
+
+    def verrouille(*a, **k):
+        raise PermissionError("ouvert")
+
+    monkeypatch.setattr(installation, "installer", verrouille)
+
+    def scenario():
+        fenetres.proposer_installation(app)
+        yield 200
+        bouton_nomme(toplevels(app)[-1], "Installer").invoke()
+        yield 100
+        assert any(m[0] == "showerror" and "Fermez-la" in m[2] for m in d.messages)
+
+    executer(app, scenario)
+
+
+def test_update_failure_is_shown_and_retry_possible(ui, monkeypatch):
+    import fenetres
+    s, creer, d = ui
+    app = creer()
+
+    def panne(*a, **k):
+        raise OSError("réseau coupé")
+
+    monkeypatch.setattr(updater, "download", panne)
+
+    def scenario():
+        fenetres.popup_mise_a_jour(app, updater.Update("9.9.9", "https://exemple/Pagilis.exe", None, ""))
+        yield 200
+        popup = toplevels(app)[-1]
+        bouton = bouton_nomme(popup, "Mettre à jour")
+        bouton.invoke()
+        yield 500
+        textes = [w.cget("text") for w in descendants(popup) if isinstance(w, s_ctk().CTkLabel)]
+        assert any(t.startswith("Échec") and "réseau coupé" in t for t in textes)
+        assert bouton.cget("state") == "normal"  # on peut réessayer
+
+    executer(app, scenario)
+
+
+@pytest.mark.parametrize("confirme", [True, False])
+def test_uninstall_asks_before_removing(monkeypatch, confirme):
+    import fenetres
+    import tkinter.messagebox as mb
+    retire = []
+    monkeypatch.setattr(mb, "askyesno", lambda *a, **k: confirme)
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **k: None)
+    monkeypatch.setattr(installation, "tourne_depuis_installation", lambda *a: False)
+    monkeypatch.setattr(installation, "desinstaller", lambda **k: retire.append(k))
+    fenetres.desinstaller_avec_confirmation()
+    assert retire == ([{"attendre_pid": None}] if confirme else [])

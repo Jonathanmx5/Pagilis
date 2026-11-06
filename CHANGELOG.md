@@ -11,6 +11,22 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.7.2]
+
+- Plus rapide sur les longs documents : « Pages » s'affiche et pivote en une
+  fraction de seconde (plusieurs secondes avant sur 300 pages) ; rechercher et
+  remplacer ne lisent en détail que les pages qui contiennent le mot.
+- « Remplacer partout » tourne en arrière-plan avec une barre de progression :
+  la fenêtre ne se fige plus.
+- Plus fiable : une erreur imprévue est signalée et notée dans le journal ; le
+  journal ne grossit plus sans fin ; la mémoire réservée aux annulations est
+  plafonnée.
+- Corrections : la pastille « Non enregistré » disparaît quand on annule
+  jusqu'au document enregistré ; un bloc ramené à sa place n'est plus réécrit ;
+  Ctrl+S fonctionne pendant une correction ; « Ouvrir avec Pagilis PDF »
+  accepte les documents Word ; les messages d'erreur de Word gardent leurs
+  accents.
+
 ## [1.7.1]
 
 - Le logiciel s'appelle désormais Pagilis PDF : fenêtre, raccourcis, « Applications
