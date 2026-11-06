@@ -496,3 +496,153 @@ def test_word_conversion_error_is_shown(ui, tmp_path, monkeypatch):
         assert ("showwarning", "Pagilis", message) in d.messages
 
     executer(app, scenario)
+
+
+def ouvrir_modifier(app, chemin, page=1):
+    app.afficher_page("Modifier")
+    app.ouvrir_document(str(chemin))
+    app.apercu.aller(page)
+
+
+def centre_mot(page, mot):
+    r = [core.to_displayed(page, w[:4]) for w in page.get_text("words") if w[4] == mot][0]
+    return fitz.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2)
+
+
+def cliquer(app, point):
+    app._souris_appui(point)
+    app._souris_relache(point)
+
+
+def test_click_line_opens_entry_with_its_text(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        yield 50
+        assert app.saisie is not None and app.saisie.winfo_ismapped()
+        assert app.saisie.get() == "Montant total : 1 200 euros."
+
+    executer(app, scenario)
+
+
+def test_enter_applies_correction(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        yield 50
+        app.saisie.delete(0, "end")
+        app.saisie.insert(0, "Montant total : 950 euros.")
+        app.saisie._entry.focus_force()
+        yield 50
+        app.saisie._entry.event_generate("<Return>", when="tail")
+        yield 300
+        assert app.saisie is None and app.edition.modifie
+        assert app.apercu.index == 1
+        assert "Montant total : 950 euros." in " ".join(app.apercu.page.get_text().split())
+
+    executer(app, scenario)
+
+
+def test_escape_cancels(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        yield 50
+        app.saisie.insert(0, "xxx")
+        app.saisie._entry.event_generate("<Escape>")
+        yield 50
+        assert app.saisie is None and not app.edition.modifie
+
+    executer(app, scenario)
+
+
+@pytest.mark.parametrize("action", ["zoom", "page", "travail"])
+def test_entry_closes_on_zoom_page_change_or_job(ui, contrat, action):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        cliquer(app, centre_mot(app.apercu.page, "Montant"))
+        yield 50
+        app.saisie.insert(0, "xxx")
+        if action == "zoom":
+            app.apercu.zoomer(1.25)
+            yield 300
+        elif action == "page":
+            app.apercu.aller(0)
+            yield 50
+        else:
+            app.lancer(lambda p: None)
+            yield TRAVAUX
+        assert app.saisie is None and not app.edition.modifie
+
+    executer(app, scenario)
+
+
+def test_drag_moves_block_with_ghost(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        avant = centre_mot(app.apercu.page, "signe")
+        app._souris_appui(avant)
+        app._souris_glisse(avant + (0, 100))
+        assert superpositions(app)  # fantôme du bloc
+        app._souris_relache(avant + (0, 100))
+        yield 300
+        assert app.saisie is None and app.edition.modifie
+        apres = centre_mot(app.apercu.page, "signe")
+        assert abs(apres.y - (avant.y + 100)) < 3
+
+    executer(app, scenario)
+
+
+def test_small_jitter_is_a_click(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        point = centre_mot(app.apercu.page, "Montant")
+        app._souris_appui(point)
+        app._souris_glisse(point + (1, 0))
+        app._souris_relache(point + (1, 0))
+        yield 50
+        assert app.saisie is not None and not app.edition.modifie
+
+    executer(app, scenario)
+
+
+def test_click_on_scan_suggests_ocr(ui, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    scan = tmp_path / "scan.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(scan)
+
+    def scenario():
+        ouvrir_modifier(app, scan, page=0)
+        yield 300
+        cliquer(app, fitz.Point(200, 200))
+        assert app.saisie is None
+        assert app.etat.cget("text") == "Aucun texte ici. Page scannée ? Utilisez l'OCR d'abord."
+
+    executer(app, scenario)

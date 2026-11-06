@@ -89,6 +89,16 @@ class Apercu(ctk.CTkFrame):
         if self.on_page:
             self.on_page(self.index)
 
+    def remplacer(self, doc: fitz.Document):
+        """Affiche une nouvelle version du MÊME document : même page, même zoom.
+
+        L'ancien objet n'est pas fermé ici : c'est son propriétaire (la copie de
+        travail) qui le ferme.
+        """
+        self.doc = doc
+        self.index = min(self.index, doc.page_count - 1)
+        self._planifier_rendu()
+
     @property
     def page(self) -> Optional[fitz.Page]:
         return self.doc[self.index] if self.doc is not None else None

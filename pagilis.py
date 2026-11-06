@@ -58,6 +58,10 @@ def sauver_config(config: dict) -> None:
         logging.exception("Impossible d'écrire la configuration")
 
 
+# Page « Modifier » : au-delà de ce déplacement de la souris (pixels écran), un appui
+# devient un glisser (déplacer le bloc) au lieu d'un clic (corriger la ligne).
+SEUIL_GLISSER = 5
+
 # Fonctions affichées dans la barre latérale : (nom, icône, description).
 FONCTIONS = [
     ("Modifier", "✎", "Corriger ou déplacer du texte, PDF ou Word"),
@@ -83,6 +87,11 @@ class Pagilis(ctk.CTk):
         self.chemin_pdf: str | None = None
         # Copie de travail de la page « Modifier » (document affiché dans l'aperçu).
         self.edition: Edition | None = None
+        self.saisie: ctk.CTkEntry | None = None  # zone de correction posée sur l'aperçu
+        self._ligne_saisie: core.LineInfo | None = None
+        self._contexte_saisie = None  # (page, zoom, décalage) à l'ouverture de la zone
+        self._fenetre_saisie = None   # élément du canevas qui porte la zone
+        self._rappel_police = False   # rappel « police réécrite » déjà affiché
         # PDF issus des conversions Word de la session ; dossier supprimé à la fermeture.
         self.dossier_conversions = tempfile.mkdtemp(prefix="pagilis-word-")
         self.page_active = FONCTIONS[0][0]
@@ -495,6 +504,7 @@ class Pagilis(ctk.CTk):
                 self.after(0, lambda: self.barre.set(0))
                 self.after(0, self._fin_travail)
 
+        self._fermer_saisie()  # le document va être lu par un autre thread
         self.travaux_en_cours += 1
         self.barre.set(0)
         self.barre.grid()  # visible uniquement pendant un traitement
@@ -1115,6 +1125,7 @@ class Pagilis(ctk.CTk):
 
     def _page_changee(self, _index: int):
         """Changement de page (pas de zoom) : la sélection de texte n'a plus de sens."""
+        self._fermer_saisie()
         self.selection = None
         self._maj_champs_deplacement()
 
@@ -1140,13 +1151,25 @@ class Pagilis(ctk.CTk):
                     fantome = fitz.Rect(self.selection) + (dx, dy, dx, dy)
                     canevas.create_rectangle(*apercu.rect_canevas(fantome), outline="#E8590C", width=2,
                                              dash=(6, 3), tags="superposition")
+        elif self.page_active == "Modifier":
+            self._dessiner_modifier(apercu)
         elif self.page_active == "OCR (scans)" and self.encadrer_mots.get():
             for rect in core.word_rects(apercu.page):
                 canevas.create_rectangle(*apercu.rect_canevas(rect), outline="#2F9E44", tags="superposition")
 
     def _souris_appui(self, point: fitz.Point):
         self._geste = None
-        if self.page_active == "Signature / Tampon":
+        if self.page_active == "Modifier":
+            self._fermer_saisie()
+            if self.edition is None or self.travaux_en_cours:
+                return
+            page = self.apercu.page
+            ligne = core.line_at(page, point)
+            bloc = ligne.block_rect if ligne else next(
+                (fitz.Rect(b) for b in core.text_blocks(page) if b.contains(point)), None)
+            # (nature, départ, ligne sous la souris, bloc, point courant si glisser)
+            self._geste = ("modifier", point, ligne, bloc, None)
+        elif self.page_active == "Signature / Tampon":
             if not self.image_tampon:
                 return self.statut("Choisissez d'abord une image.")
             rect = self._rect_tampon()
@@ -1169,6 +1192,15 @@ class Pagilis(ctk.CTk):
     def _souris_glisse(self, point: fitz.Point):
         if not self._geste:
             return
+        if self._geste[0] == "modifier":
+            _n, depart, ligne, bloc, courant = self._geste
+            x0, y0 = self.apercu.vers_canevas(depart.x, depart.y)
+            x1, y1 = self.apercu.vers_canevas(point.x, point.y)
+            # Au-delà de SEUIL_GLISSER pixels à l'écran, c'est un déplacement, pas un clic.
+            if bloc is not None and (courant is not None or abs(x1 - x0) + abs(y1 - y0) > SEUIL_GLISSER):
+                self._geste = ("modifier", depart, ligne, bloc, point)
+                self.apercu.redessiner()
+            return
         nature, valeur = self._geste
         if nature == "tampon":
             self._remplir(self.entree_x, max(0, point.x - valeur.x))
@@ -1183,6 +1215,19 @@ class Pagilis(ctk.CTk):
         self.apercu.redessiner()
 
     def _souris_relache(self, point: fitz.Point):
+        if self._geste and self._geste[0] == "modifier":
+            _n, depart, ligne, bloc, courant = self._geste
+            self._geste = None
+            if courant is not None:
+                index = self.apercu.index
+                self._retoucher(lambda: self.edition.deplacer(index, bloc, point.x - depart.x,
+                                                              point.y - depart.y))
+            elif ligne is not None:
+                self._ouvrir_saisie(ligne)
+            elif not core.has_text(self.apercu.page):
+                self.statut("Aucun texte ici. Page scannée ? Utilisez l'OCR d'abord.")
+            self.apercu.redessiner()
+            return
         if self._geste and self._geste[0] == "selection" and (self.selection is None or
                                                               self.selection.width < 3 or self.selection.height < 3):
             # Simple clic : on sélectionne le bloc de texte situé sous la souris.
@@ -1191,6 +1236,83 @@ class Pagilis(ctk.CTk):
             self._maj_champs_deplacement()
             self.apercu.redessiner()
         self._geste = None
+
+
+    # ------------------------------------------- page « Modifier » : retouches
+
+    def _dessiner_modifier(self, apercu: Apercu):
+        canevas = apercu.canevas
+        if self.saisie is not None:
+            if self._contexte_saisie != (apercu.index, apercu.zoom, apercu.decalage):
+                self._fermer_saisie()  # zoom ou page changés : la zone n'est plus à sa place
+            elif self._fenetre_saisie is None or not canevas.type(self._fenetre_saisie):
+                self._poser_saisie()   # rendu complet : l'élément du canevas a été effacé
+        geste = self._geste
+        if geste and geste[0] == "modifier" and geste[4] is not None:
+            _n, depart, _ligne, bloc, courant = geste
+            dx, dy = courant.x - depart.x, courant.y - depart.y
+            canevas.create_rectangle(*apercu.rect_canevas(bloc), outline="#1F6AA5", width=2,
+                                     tags="superposition")
+            canevas.create_rectangle(*apercu.rect_canevas(bloc + (dx, dy, dx, dy)), outline="#E8590C",
+                                     width=2, dash=(6, 3), tags="superposition")
+
+    def _ouvrir_saisie(self, ligne: core.LineInfo):
+        """Pose une zone de saisie sur la ligne, avec son texte actuel sélectionné."""
+        self._fermer_saisie()
+        taille = max(9, round(ligne.size * self.apercu.zoom * 0.9))
+        x0, y0, x1, y1 = self.apercu.rect_canevas(ligne.rect)
+        self.saisie = ctk.CTkEntry(self.apercu.canevas, width=max(int(x1 - x0) + 24, 200),
+                                   height=max(int(y1 - y0) + 10, 28), font=ctk.CTkFont(size=taille))
+        self.saisie.insert(0, ligne.text)
+        self.saisie.select_range(0, "end")
+        self.saisie.bind("<Return>", lambda _e: self._valider_saisie())
+        self.saisie.bind("<KP_Enter>", lambda _e: self._valider_saisie())
+        self.saisie.bind("<Escape>", lambda _e: self._fermer_saisie())
+        self._ligne_saisie = ligne
+        self._contexte_saisie = (self.apercu.index, self.apercu.zoom, self.apercu.decalage)
+        self._poser_saisie()
+        self.saisie.focus_set()
+
+    def _poser_saisie(self):
+        x0, y0, _x1, y1 = self.apercu.rect_canevas(self._ligne_saisie.rect)
+        hauteur = max(int(y1 - y0) + 10, 28)
+        self._fenetre_saisie = self.apercu.canevas.create_window(
+            x0 - 6, (y0 + y1) / 2 - hauteur / 2, anchor="nw", window=self.saisie)
+
+    def _fermer_saisie(self):
+        """Ferme la zone de saisie sans rien appliquer."""
+        if self.saisie is not None:
+            if self._fenetre_saisie is not None:
+                self.apercu.canevas.delete(self._fenetre_saisie)
+            self.saisie.destroy()
+        self.saisie = self._ligne_saisie = self._contexte_saisie = self._fenetre_saisie = None
+
+    def _valider_saisie(self):
+        ligne, index, texte = self._ligne_saisie, self.apercu.index, self.saisie.get()
+        self._fermer_saisie()
+        centre = fitz.Point((ligne.rect.x0 + ligne.rect.x1) / 2, (ligne.rect.y0 + ligne.rect.y1) / 2)
+        if self._retoucher(lambda: self.edition.corriger(index, centre, texte)) and not self._rappel_police:
+            self._rappel_police = True
+            self.statut("Ligne corrigée. Elle est réécrite en Arial, Times ou Courier selon son style "
+                        "(la police d'origine n'est pas reprise).")
+
+    def _retoucher(self, action):
+        """Applique une retouche de la copie de travail et rafraîchit l'aperçu."""
+        try:
+            resultat = action()
+        except Exception:  # noqa: BLE001 - la copie de travail est déjà restaurée
+            logging.exception("Retouche impossible")
+            messagebox.showerror("Pagilis", "Retouche impossible, le document n'a pas changé.")
+            resultat = None
+        self.apercu.remplacer(self.edition.doc)
+        self._maj_etat_edition()
+        return resultat
+
+    def _maj_etat_edition(self):
+        """Boutons Annuler / Enregistrer selon l'état de la copie de travail."""
+        ed = self.edition
+        self.bouton_annuler.configure(state="normal" if ed and ed.peut_annuler else "disabled")
+        self.bouton_enregistrer.configure(state="normal" if ed and ed.modifie else "disabled")
 
 
 def desinstaller_avec_confirmation() -> None:
