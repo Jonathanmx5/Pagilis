@@ -45,31 +45,60 @@ def sauver_config(config: dict) -> None:
         logging.exception("Impossible d'écrire la configuration")
 
 
+# Fonctions affichées dans la barre latérale : (nom, icône, description).
+FONCTIONS = [
+    ("Fusion", "⧉", "Assembler plusieurs PDF dans l'ordre choisi"),
+    ("Division", "✂", "Découper un PDF en plusieurs fichiers"),
+    ("Signature / Tampon", "✍", "Poser une signature ou un tampon image"),
+    ("Remplacer du texte", "⇄", "Rechercher et remplacer du texte"),
+    ("Déplacer du texte", "✥", "Déplacer un bloc de texte sur la page"),
+    ("OCR (scans)", "◎", "Rendre un PDF scanné cherchable"),
+]
+
+
 class PDFStudio(ctk.CTk):
-    """Fenêtre principale : un onglet par fonctionnalité."""
+    """Fenêtre principale : fonctions dans une barre à gauche, page de travail à droite."""
 
     def __init__(self):
         super().__init__()
         self.title("PDF Studio")
-        self.geometry("760x620")
+        self.geometry("1000x660")
+        self.minsize(860, 560)
         self.config_data = charger_config()
         self.dernier_dossier = self.config_data.get("dernier_dossier", os.path.expanduser("~"))
         self.chemin_pdf: str | None = None
         # Nombre de traitements en cours : la mise à jour est bloquée tant qu'il est > 0.
         self.travaux_en_cours = 0
 
-        # Barre de fichier courant commune à tous les onglets.
-        haut = ctk.CTkFrame(self)
-        haut.pack(fill="x", padx=12, pady=(12, 0))
-        ctk.CTkButton(haut, text="Ouvrir un PDF…", command=self.choisir_pdf).pack(side="left", padx=8, pady=8)
-        self.label_fichier = ctk.CTkLabel(haut, text="Aucun fichier")
-        self.label_fichier.pack(side="left", padx=8)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self._construire_barre_laterale()
 
-        self.onglets = ctk.CTkTabview(self)
-        self.onglets.pack(fill="both", expand=True, padx=12, pady=12)
-        for nom in ["Fusion", "Division", "Signature / Tampon", "Remplacer du texte",
-                    "Déplacer du texte", "OCR (scans)"]:
-            self.onglets.add(nom)
+        # Zone principale : en-tête (titre + fichier courant), page, barre d'état.
+        principal = ctk.CTkFrame(self, fg_color="transparent")
+        principal.grid(row=0, column=1, sticky="nsew", padx=20, pady=16)
+        principal.grid_columnconfigure(0, weight=1)
+        principal.grid_rowconfigure(1, weight=1)
+
+        entete = ctk.CTkFrame(principal, fg_color="transparent")
+        entete.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        entete.grid_columnconfigure(0, weight=1)
+        self.titre_page = ctk.CTkLabel(entete, text="", font=ctk.CTkFont(size=24, weight="bold"), anchor="w")
+        self.titre_page.grid(row=0, column=0, sticky="w")
+        self.sous_titre_page = ctk.CTkLabel(entete, text="", text_color=("gray40", "gray65"), anchor="w")
+        self.sous_titre_page.grid(row=1, column=0, sticky="w")
+        fichier = ctk.CTkFrame(entete)
+        fichier.grid(row=0, column=1, rowspan=2, sticky="e")
+        self.label_fichier = ctk.CTkLabel(fichier, text="Aucun fichier ouvert", text_color=("gray40", "gray65"))
+        self.label_fichier.pack(side="left", padx=(12, 8), pady=8)
+        ctk.CTkButton(fichier, text="Ouvrir un PDF…", width=130, command=self.choisir_pdf).pack(side="left", padx=(0, 8), pady=8)
+
+        # Une page (défilante) par fonction ; une seule est visible à la fois.
+        self.pages: dict[str, ctk.CTkScrollableFrame] = {}
+        for nom, _icone, _description in FONCTIONS:
+            page = ctk.CTkScrollableFrame(principal, corner_radius=10)
+            page.grid_columnconfigure(0, weight=1)
+            self.pages[nom] = page
         self._construire_fusion()
         self._construire_division()
         self._construire_tampon()
@@ -77,16 +106,83 @@ class PDFStudio(ctk.CTk):
         self._construire_deplacement()
         self._construire_ocr()
 
-        self.barre = ctk.CTkProgressBar(self)
+        etat = ctk.CTkFrame(principal, fg_color="transparent")
+        etat.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        etat.grid_columnconfigure(0, weight=1)
+        self.etat = ctk.CTkLabel(etat, text="Prêt", anchor="w")
+        self.etat.grid(row=0, column=0, sticky="w")
+        self.barre = ctk.CTkProgressBar(etat, width=220)
         self.barre.set(0)
-        self.barre.pack(fill="x", padx=12)
-        self.etat = ctk.CTkLabel(self, text="Prêt", anchor="w")
-        self.etat.pack(fill="x", padx=12, pady=(4, 8))
+        self.barre.grid(row=0, column=1, sticky="e")
+        self.barre.grid_remove()  # réapparaît pendant les traitements
+
+        derniere = self.config_data.get("derniere_page")
+        self.afficher_page(derniere if derniere in self.pages else FONCTIONS[0][0])
         self.protocol("WM_DELETE_WINDOW", self._fermer)
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
         version_ignoree = self.config_data.get("version_ignoree")
         threading.Thread(target=self._chercher_mise_a_jour, args=(version_ignoree,), daemon=True).start()
+
+    # ------------------------------------------------- barre latérale
+
+    def _construire_barre_laterale(self):
+        barre = ctk.CTkFrame(self, width=240, corner_radius=0)
+        barre.grid(row=0, column=0, sticky="nsw")
+        barre.grid_propagate(False)
+        barre.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(barre, text="PDF Studio", font=ctk.CTkFont(size=22, weight="bold"),
+                     anchor="w").grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 0))
+        ctk.CTkLabel(barre, text=f"Version {updater.APP_VERSION}", text_color=("gray40", "gray60"),
+                     anchor="w").grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
+        ctk.CTkLabel(barre, text="FONCTIONS", font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=("gray45", "gray55"), anchor="w").grid(row=2, column=0, sticky="ew", padx=20, pady=(0, 6))
+
+        self.boutons_nav: dict[str, ctk.CTkButton] = {}
+        for i, (nom, icone, _description) in enumerate(FONCTIONS):
+            bouton = ctk.CTkButton(
+                barre, text=f"{icone}   {nom}", anchor="w", height=40, corner_radius=8,
+                font=ctk.CTkFont(size=14), fg_color="transparent",
+                text_color=("gray10", "gray90"), hover_color=("gray75", "gray30"),
+                command=lambda n=nom: self.afficher_page(n),
+            )
+            bouton.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
+            self.boutons_nav[nom] = bouton
+
+        # Pousse le choix du thème tout en bas de la barre.
+        barre.grid_rowconfigure(3 + len(FONCTIONS), weight=1)
+        ctk.CTkLabel(barre, text="Apparence", anchor="w", text_color=("gray40", "gray60")).grid(
+            row=4 + len(FONCTIONS), column=0, sticky="ew", padx=20)
+        themes = {"Système": "system", "Clair": "light", "Sombre": "dark"}
+        actuel = self.config_data.get("apparence", "system")
+        menu = ctk.CTkOptionMenu(
+            barre, values=list(themes),
+            command=lambda choix: self._changer_apparence(themes[choix]),
+        )
+        menu.set(next(k for k, v in themes.items() if v == actuel))
+        menu.grid(row=5 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 20))
+        ctk.set_appearance_mode(actuel)
+
+    def _changer_apparence(self, mode: str):
+        ctk.set_appearance_mode(mode)
+        self.config_data["apparence"] = mode
+
+    def afficher_page(self, nom: str):
+        """Affiche la page d'une fonction et met en évidence son bouton."""
+        for autre, page in self.pages.items():
+            if autre != nom:
+                page.grid_forget()
+        self.pages[nom].grid(row=1, column=0, sticky="nsew")
+        for autre, bouton in self.boutons_nav.items():
+            choisi = autre == nom
+            bouton.configure(
+                fg_color=("#3B8ED0", "#1F6AA5") if choisi else "transparent",
+                text_color=("white", "white") if choisi else ("gray10", "gray90"),
+            )
+        description = next(d for n, _i, d in FONCTIONS if n == nom)
+        self.titre_page.configure(text=nom)
+        self.sous_titre_page.configure(text=description)
+        self.config_data["derniere_page"] = nom
 
     # ------------------------------------------------------ mises à jour
 
@@ -229,10 +325,14 @@ class PDFStudio(ctk.CTk):
                 self.after(0, self._fin_travail)
 
         self.travaux_en_cours += 1
+        self.barre.set(0)
+        self.barre.grid()  # visible uniquement pendant un traitement
         threading.Thread(target=cible, daemon=True).start()
 
     def _fin_travail(self):
         self.travaux_en_cours -= 1
+        if not self.travaux_en_cours:
+            self.barre.grid_remove()
 
     def _fin_ok(self, resultat, fin):
         self.statut("Terminé.")
@@ -262,7 +362,7 @@ class PDFStudio(ctk.CTk):
     # ---------------------------------------------------------- Fusion
 
     def _construire_fusion(self):
-        onglet = self.onglets.tab("Fusion")
+        onglet = self.pages["Fusion"]
         self.liste_fusion: list[str] = []
         self.zone_fusion = ctk.CTkTextbox(onglet, height=300)
         self.zone_fusion.pack(fill="both", expand=True, padx=8, pady=8)
@@ -315,7 +415,7 @@ class PDFStudio(ctk.CTk):
     # -------------------------------------------------------- Division
 
     def _construire_division(self):
-        onglet = self.onglets.tab("Division")
+        onglet = self.pages["Division"]
         self.mode_division = ctk.StringVar(value="page")
         for valeur, texte in [("page", "Une page par fichier"),
                               ("n", "Toutes les N pages"),
@@ -353,7 +453,7 @@ class PDFStudio(ctk.CTk):
     # ---------------------------------------------- Signature / Tampon
 
     def _construire_tampon(self):
-        onglet = self.onglets.tab("Signature / Tampon")
+        onglet = self.pages["Signature / Tampon"]
         self.image_tampon: str | None = None
         ctk.CTkButton(onglet, text="Choisir l'image (PNG/JPG)…", command=self.choisir_tampon).pack(anchor="w", padx=12, pady=6)
         self.label_tampon = ctk.CTkLabel(onglet, text="Aucune image")
@@ -363,7 +463,11 @@ class PDFStudio(ctk.CTk):
         self.entree_l = self._champ(onglet, "Largeur (pt)", "120")
         self.entree_op = self._champ(onglet, "Opacité (%)", "100")
         self.rotation_tampon = ctk.StringVar(value="0")
-        ctk.CTkOptionMenu(onglet, values=["0", "90", "180", "270"], variable=self.rotation_tampon).pack(anchor="w", padx=12, pady=4)
+        ligne = ctk.CTkFrame(onglet, fg_color="transparent")
+        ligne.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(ligne, text="Rotation (°)", width=140, anchor="w").pack(side="left")
+        ctk.CTkOptionMenu(ligne, values=["0", "90", "180", "270"], width=100,
+                          variable=self.rotation_tampon).pack(side="left")
         self.blanc_transparent = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(onglet, text="Fond blanc transparent (signature scannée)", variable=self.blanc_transparent).pack(anchor="w", padx=12, pady=4)
         self.portee_tampon = ctk.StringVar(value="page")
@@ -436,7 +540,7 @@ class PDFStudio(ctk.CTk):
     # ----------------------------------------------- Remplacer du texte
 
     def _construire_remplacement(self):
-        onglet = self.onglets.tab("Remplacer du texte")
+        onglet = self.pages["Remplacer du texte"]
         self.entree_ancien = self._champ(onglet, "Texte à remplacer", "")
         self.entree_nouveau = self._champ(onglet, "Nouveau texte (vide = effacer)", "")
         self.entree_plage_rempl = self._champ(onglet, "Pages (vide = toutes)", "")
@@ -510,7 +614,7 @@ class PDFStudio(ctk.CTk):
     # ----------------------------------------------- Déplacer du texte
 
     def _construire_deplacement(self):
-        onglet = self.onglets.tab("Déplacer du texte")
+        onglet = self.pages["Déplacer du texte"]
         ctk.CTkLabel(onglet, text="Zone à déplacer (points, repère affiché) : page, x0, y0, x1, y1").pack(anchor="w", padx=12, pady=4)
         self.entree_page_dep = self._champ(onglet, "Page", "1")
         self.entree_zone = self._champ(onglet, "Zone x0,y0,x1,y1", "0,0,300,100")
@@ -557,7 +661,7 @@ class PDFStudio(ctk.CTk):
     # ----------------------------------------------------------- OCR
 
     def _construire_ocr(self):
-        onglet = self.onglets.tab("OCR (scans)")
+        onglet = self.pages["OCR (scans)"]
         self.entree_langue = self._champ(onglet, "Langue (ex. fra, eng)", "fra")
         self.entree_dpi = self._champ(onglet, "Résolution (200/300/400)", "300")
         self.entree_pages_ocr = self._champ(onglet, "Pages (vide = toutes)", "")
