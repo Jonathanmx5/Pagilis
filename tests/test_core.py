@@ -646,3 +646,33 @@ def test_extract_pages_keeps_order_and_rotation(tmp_path):
     assert ordre(extrait) == ["Page 1", "Page 3"]
     assert extrait[1].rotation == 90
     assert doc.page_count == 4  # le document n'est pas touché
+
+
+# ------------------------------------------------------------ performances
+
+
+def test_search_and_replace_skip_pages_without_the_word(monkeypatch):
+    """Seules les pages qui contiennent le mot sont lues en détail (lecture caractère par caractère)."""
+    doc = fitz.open()
+    for i in range(10):
+        doc.new_page().insert_text((50, 50), "Le montant est dû." if i == 3 else "Rien ici.", fontsize=12)
+    lues = []
+    vraie = core.iter_lines
+    monkeypatch.setattr(core, "iter_lines", lambda page: (lues.append(page.number), vraie(page))[1])
+    assert list(core.find_text_rects(doc, "MONTANT")) == [3]
+    assert set(lues) == {3}
+    lues.clear()
+    assert core.replace_text(doc, "montant", "total", range(10)) == 1
+    assert set(lues) == {3}
+    assert "total" in doc[3].get_text()
+
+
+def test_shrink_not_computed_when_new_text_is_not_longer(monkeypatch):
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "Montant total : 1 200 euros.", fontsize=12)
+    appels = []
+    monkeypatch.setattr(core, "_reduction", lambda *a: appels.append(a) or 1.0)
+    core.replace_text(doc, "1 200", "950", [0], shrink_if_longer=True)
+    assert appels == []
+    core.replace_text(doc, "950", "95 000 000", [0], shrink_if_longer=True)
+    assert len(appels) == 1

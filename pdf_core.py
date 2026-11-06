@@ -394,6 +394,11 @@ def _find_matches(page: fitz.Page, needle: str, match_case: bool) -> list[fitz.R
     if not needle:
         return []
     cible = needle if match_case else needle.lower()
+    # Tri rapide : la lecture caractère par caractère (rawdict) coûte cher, on ne
+    # la fait que sur les pages dont le texte contient le mot.
+    texte_page = page.get_text("text")
+    if cible not in (texte_page if match_case else texte_page.lower()):
+        return []
     rects: list[fitz.Rect] = []
     for _line, chars in iter_lines(page):
         texte = "".join(c["c"] for c in chars)
@@ -469,9 +474,7 @@ def _spans_of_line(line: dict) -> list[TextSpan]:
             continue
         gras, italique, serif, mono = _style_flags(s)
         texte = "".join(c["c"] for c in chars)
-        rect = fitz.Rect(chars[0]["bbox"])
-        for c in chars[1:]:
-            rect |= fitz.Rect(c["bbox"])
+        rect = fitz.Rect(s["bbox"])  # cadre du segment, fourni tel quel par PyMuPDF
         spans.append(
             TextSpan(
                 text=texte,
@@ -705,13 +708,18 @@ def replace_text(
     total = 0
     for k, idx in enumerate(pages):
         page = doc[idx]
-        rects = _find_matches(page, old, match_case)
-        if rects:
-            # Pour chaque ligne concernée, on réécrit l'intégralité des segments.
-            morceaux_a_reecrire = []
-            for line, _chars in iter_lines(page):
-                if any(fitz.Rect(line["bbox"]).intersects(r) for r in rects):
+        cible = old if match_case else old.lower()
+        texte_page = page.get_text("text")
+        # Tri rapide : seules les pages qui contiennent le mot sont lues en détail.
+        morceaux_a_reecrire, trouves = [], 0
+        if cible in (texte_page if match_case else texte_page.lower()):
+            for line, chars in iter_lines(page):
+                texte = "".join(c["c"] for c in chars)
+                n = (texte if match_case else texte.lower()).count(cible)
+                if n:  # ligne concernée : on réécrit l'intégralité de ses segments
                     morceaux_a_reecrire.append(_spans_of_line(line))
+                    trouves += n
+        if morceaux_a_reecrire:
             # Polices choisies AVANT l'effacement (qui peut les retirer de la page).
             a_ecrire = []
             for spans in morceaux_a_reecrire:
@@ -723,11 +731,12 @@ def replace_text(
             _redact_rects(page, [s.bbox for spans in morceaux_a_reecrire for s in spans])
             for span, texte_nouveau, police in a_ecrire:
                 shrink = 1.0
-                if shrink_if_longer and texte_nouveau != span.text:
+                # La largeur n'est calculée que si le texte s'allonge (calcul coûteux).
+                if shrink_if_longer and len(texte_nouveau) > len(span.text):
                     shrink = _reduction(police, span.text, texte_nouveau, span.size)
                 span.text = texte_nouveau
                 _write_span(page, span, span.origin, shrink, police)
-            total += len(rects)
+            total += trouves
         if progress:
             progress(k + 1, len(pages))
     return total
@@ -839,7 +848,8 @@ def rewrite_line(
         return LIGNE_EFFACEE
     principal = max(spans, key=lambda s: len(s.text))
     police = _police_pour(page, principal, new_text)  # avant l'effacement
-    reduction = _reduction(police, ancien, new_text, principal.size) if shrink_if_longer else 1.0
+    reduction = (_reduction(police, ancien, new_text, principal.size)
+                 if shrink_if_longer and len(new_text) > len(ancien) else 1.0)
     _redact_rects(page, [s.bbox for s in spans])
     segment = TextSpan(**{**principal.__dict__, "text": new_text})
     _write_span(page, segment, spans[0].origin, reduction, police)
