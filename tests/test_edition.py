@@ -108,3 +108,49 @@ def test_failed_edit_restores_document(ed, monkeypatch):
         ed.corriger(0, centre(ed.doc, "Montant"), "x")
     assert LIGNE in texte(ed.doc)
     assert not ed.peut_annuler and not ed.modifie
+
+
+# ------------------------------------------------------- gestion des pages
+
+
+@pytest.fixture
+def ed3(tmp_path):
+    chemin = tmp_path / "trois.pdf"
+    doc = fitz.open()
+    for i in range(3):
+        doc.new_page().insert_text((50, 50), f"Page {i + 1}")
+    doc.save(chemin)
+    return edition.Edition(core.open_pdf(str(chemin)), str(chemin))
+
+
+def ordre(doc):
+    return [p.get_text().strip() for p in doc]
+
+
+def test_page_actions_are_undoable(ed3, tmp_path):
+    autre = tmp_path / "autre.pdf"
+    a = fitz.open()
+    a.new_page().insert_text((50, 50), "X")
+    a.save(autre)
+    assert ed3.pivoter([0], 90)
+    assert ed3.supprimer([1]) == 1
+    assert ed3.deplacer_pages([1], -1) == [0]
+    assert ed3.inserer(str(autre), apres=0) == [1]
+    assert ordre(ed3.doc) == ["Page 3", "X", "Page 1"]
+    assert ed3.modifie
+    for attendu in (["Page 3", "Page 1"], ["Page 1", "Page 3"], ["Page 1", "Page 2", "Page 3"]):
+        ed3.annuler()
+        assert ordre(ed3.doc) == attendu
+    ed3.annuler()
+    assert ed3.doc[0].rotation == 0 and not ed3.peut_annuler
+
+
+def test_page_move_without_effect_creates_no_snapshot(ed3):
+    assert ed3.deplacer_pages([0], -1) == []
+    assert not ed3.peut_annuler and not ed3.modifie
+
+
+def test_refused_page_delete_leaves_document_intact(ed3):
+    with pytest.raises(core.PagilisError):
+        ed3.supprimer([0, 1, 2])
+    assert ed3.doc.page_count == 3 and not ed3.peut_annuler

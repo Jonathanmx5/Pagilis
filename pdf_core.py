@@ -846,6 +846,75 @@ def rewrite_line(
     return police.niveau
 
 
+# ------------------------------------------------------- gestion des pages
+# Indices de pages comptés à partir de 0. Ces fonctions modifient `doc` en mémoire.
+
+
+def rotate_pages(doc: fitz.Document, pages: Iterable[int], angle: int) -> int:
+    """Ajoute `angle` (multiple de 90, positif = sens horaire) à la rotation des pages."""
+    pages = sorted(set(pages))
+    for i in pages:
+        doc[i].set_rotation((doc[i].rotation + angle) % 360)
+    return len(pages)
+
+
+def delete_pages(doc: fitz.Document, pages: Iterable[int]) -> int:
+    """Supprime les pages. Refuse de supprimer toutes les pages (un PDF vide est invalide)."""
+    pages = sorted(set(pages))
+    if len(pages) >= doc.page_count:
+        raise PagilisError("Impossible de supprimer toutes les pages : il doit en rester au moins une.")
+    doc.delete_pages(pages)
+    return len(pages)
+
+
+def move_pages(doc: fitz.Document, pages: Iterable[int], sens: int) -> list[int]:
+    """Avance (sens=-1) ou recule (sens=1) les pages sélectionnées d'un cran.
+
+    Retourne les nouveaux indices de la sélection ; liste vide (et rien ne bouge)
+    si la sélection touche déjà le début ou la fin du document.
+    """
+    selection = sorted(set(pages))
+    n = doc.page_count
+    if not selection or (sens < 0 and selection[0] == 0) or (sens > 0 and selection[-1] == n - 1):
+        return []
+    ordre = list(range(n))
+    # Chaque page sélectionnée échange sa place avec sa voisine, en commençant par
+    # celle qui est du côté où l'on va : un groupe de pages contiguës reste groupé.
+    for i in (selection if sens < 0 else reversed(selection)):
+        ordre[i], ordre[i + sens] = ordre[i + sens], ordre[i]
+    doc.select(ordre)
+    return [i + sens for i in selection]
+
+
+def insert_pdf(doc: fitz.Document, chemin: str, apres: Optional[int] = None) -> list[int]:
+    """Insère toutes les pages du PDF `chemin` après la page `apres` (à la fin si None).
+
+    Retourne les indices des pages insérées. Lève PasswordRequired si le PDF est protégé.
+    """
+    source = open_pdf(chemin)
+    try:
+        position = doc.page_count if apres is None else apres + 1
+        doc.insert_pdf(source, start_at=position)
+        return list(range(position, position + source.page_count))
+    finally:
+        source.close()
+
+
+def extract_pages(doc: fitz.Document, pages: Iterable[int], sortie: str) -> int:
+    """Enregistre les pages (dans l'ordre du document) dans un nouveau PDF ; doc n'est pas touché."""
+    pages = sorted(set(pages))
+    if not pages:
+        raise PagilisError("Sélectionnez au moins une page à extraire.")
+    nouveau = fitz.open()
+    try:
+        for i in pages:
+            nouveau.insert_pdf(doc, from_page=i, to_page=i)
+        save_atomic(nouveau, sortie)
+    finally:
+        nouveau.close()
+    return len(pages)
+
+
 # ----------------------------------------------------------------- OCR
 
 

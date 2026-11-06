@@ -59,6 +59,22 @@ class Edition:
         """Déplace les lignes de `rect` (repère affiché). Retourne le nombre de segments."""
         return self._retoucher(lambda: core.move_text_block(self.doc, page, rect, dx, dy))
 
+    # Gestion des pages (fonction « Pages »), annulable comme les retouches de texte.
+
+    def pivoter(self, pages: list[int], angle: int) -> int:
+        return self._retoucher(lambda: core.rotate_pages(self.doc, pages, angle))
+
+    def supprimer(self, pages: list[int]) -> int:
+        return self._retoucher(lambda: core.delete_pages(self.doc, pages))
+
+    def deplacer_pages(self, pages: list[int], sens: int) -> list[int]:
+        """Avance (-1) ou recule (1) les pages d'un cran ; retourne leurs nouveaux indices."""
+        return self._retoucher(lambda: core.move_pages(self.doc, pages, sens))
+
+    def inserer(self, chemin: str, apres: int | None = None) -> list[int]:
+        """Insère un PDF après la page `apres` (à la fin si None) ; retourne les pages insérées."""
+        return self._retoucher(lambda: core.insert_pdf(self.doc, chemin, apres))
+
     def annuler(self) -> fitz.Document:
         """Revient à l'état d'avant la dernière retouche. IndexError s'il n'y en a pas."""
         self._recharger(self._annulations.pop())

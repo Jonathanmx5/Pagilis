@@ -146,11 +146,11 @@ class Pagilis(ctk.CTk):
         derniere = self.config_data.get("derniere_page")
         self.afficher_page(derniere if derniere in self.pages else FONCTIONS[0][0])
         self.protocol("WM_DELETE_WINDOW", self._fermer)
-        # Raccourcis de la page « Modifier » (minuscule et majuscule : verrouillage).
+        # Ctrl+Z / Ctrl+S pour la page affichée (minuscule et majuscule : verrouillage).
         for touche in ("<Control-z>", "<Control-Z>"):
-            self.bind(touche, lambda _e: self.modifier.raccourci(self.modifier.annuler_retouche))
+            self.bind(touche, lambda _e: self.fonctions[self.page_active].touche_annuler())
         for touche in ("<Control-s>", "<Control-S>"):
-            self.bind(touche, lambda _e: self.modifier.raccourci(self.modifier.enregistrer_edition))
+            self.bind(touche, lambda _e: self.fonctions[self.page_active].touche_enregistrer())
         # Vérification au démarrage, hors thread de l'interface : rien ne se passe si à jour.
         # La version ignorée est lue ici, dans le thread de l'interface.
         # Seules les versions publiées pour tous sont proposées, jamais les bêtas
@@ -198,7 +198,7 @@ class Pagilis(ctk.CTk):
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
-        if nom != self.page_active and not self.fonctions[self.page_active].peut_quitter():
+        if nom != self.page_active and not self.fonctions[self.page_active].peut_quitter(self.fonctions[nom]):
             return
         for autre, page in self.pages.items():
             if autre != nom:
@@ -215,6 +215,7 @@ class Pagilis(ctk.CTk):
         self.titre_page.configure(text=nom)
         self.sous_titre_page.configure(text=self.fonctions[nom].description)
         self.config_data["derniere_page"] = nom
+        self.fonctions[nom].montree()
 
     # ------------------------------------------------------ mises à jour
 

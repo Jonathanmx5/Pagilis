@@ -61,9 +61,18 @@ class PageFonction:
     def avant_traitement(self) -> None:
         """Un traitement en arrière-plan démarre (toutes les pages sont prévenues)."""
 
-    def peut_quitter(self) -> bool:
-        """On passe à une autre fonction : Faux pour rester sur celle-ci."""
+    def peut_quitter(self, vers: "PageFonction") -> bool:
+        """On passe à la fonction `vers` : Faux pour rester sur celle-ci."""
         return True
+
+    def touche_annuler(self) -> None:
+        """Ctrl+Z, quand cette page est affichée."""
+
+    def touche_enregistrer(self) -> None:
+        """Ctrl+S, quand cette page est affichée."""
+
+    def montree(self) -> None:
+        """La page vient d'être affichée."""
 
     # -------------------------------------------------- éléments de formulaire
 

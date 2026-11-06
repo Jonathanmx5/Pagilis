@@ -576,3 +576,73 @@ def test_font_keys_match_pdf_and_windows_names(pdf, installee):
 def test_installed_fonts_come_from_windows():
     polices = core.polices_installees()
     assert polices.get(core._cle_police("Arial")) and os.path.exists(polices[core._cle_police("Arial")])
+
+
+# ------------------------------------------------------- gestion des pages
+
+
+def doc_numerote(n=5):
+    """Document de n pages ; la page i porte le texte « Page i+1 »."""
+    doc = fitz.open()
+    for i in range(n):
+        doc.new_page(width=300, height=400).insert_text((50, 50), f"Page {i + 1}", fontsize=14)
+    return doc
+
+
+def ordre(doc):
+    return [p.get_text().strip() for p in doc]
+
+
+def test_rotate_pages_adds_to_current_rotation():
+    doc = doc_numerote(3)
+    doc[1].set_rotation(90)
+    core.rotate_pages(doc, [0, 1], 90)
+    assert [p.rotation for p in doc] == [90, 180, 0]
+    core.rotate_pages(doc, [0], -90)
+    assert doc[0].rotation == 0
+
+
+def test_delete_pages_and_refuse_deleting_all():
+    doc = doc_numerote(4)
+    assert core.delete_pages(doc, [3, 1]) == 2
+    assert ordre(doc) == ["Page 1", "Page 3"]
+    with pytest.raises(core.PagilisError):
+        core.delete_pages(doc, [0, 1])
+    assert doc.page_count == 2
+
+
+@pytest.mark.parametrize("selection, sens, attendu, nouvelle", [
+    ([1], -1, ["Page 2", "Page 1", "Page 3", "Page 4", "Page 5"], [0]),
+    ([1, 2], 1, ["Page 1", "Page 4", "Page 2", "Page 3", "Page 5"], [2, 3]),
+    ([0, 3], 1, ["Page 2", "Page 1", "Page 3", "Page 5", "Page 4"], [1, 4]),
+    ([0], -1, ["Page 1", "Page 2", "Page 3", "Page 4", "Page 5"], []),   # déjà en tête : rien
+    ([4], 1, ["Page 1", "Page 2", "Page 3", "Page 4", "Page 5"], []),    # déjà en fin : rien
+])
+def test_move_pages_one_step(selection, sens, attendu, nouvelle):
+    doc = doc_numerote(5)
+    assert core.move_pages(doc, selection, sens) == nouvelle
+    assert ordre(doc) == attendu
+
+
+def test_insert_pdf_after_selection_or_at_end(tmp_path):
+    autre = tmp_path / "autre.pdf"
+    a = fitz.open()
+    for t in ("A", "B"):
+        a.new_page().insert_text((50, 50), t)
+    a.save(autre)
+    doc = doc_numerote(3)
+    assert core.insert_pdf(doc, str(autre), apres=0) == [1, 2]
+    assert ordre(doc) == ["Page 1", "A", "B", "Page 2", "Page 3"]
+    assert core.insert_pdf(doc, str(autre), apres=None) == [5, 6]
+    assert ordre(doc)[-2:] == ["A", "B"]
+
+
+def test_extract_pages_keeps_order_and_rotation(tmp_path):
+    doc = doc_numerote(4)
+    doc[2].set_rotation(90)
+    sortie = tmp_path / "extrait.pdf"
+    core.extract_pages(doc, [2, 0], str(sortie))
+    extrait = fitz.open(sortie)
+    assert ordre(extrait) == ["Page 1", "Page 3"]
+    assert extrait[1].rotation == 90
+    assert doc.page_count == 4  # le document n'est pas touché
