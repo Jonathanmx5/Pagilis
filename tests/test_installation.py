@@ -69,7 +69,7 @@ def test_install_copies_exe_creates_shortcuts_and_registers(emplacements, exe_po
     assert all(lien.exists() for lien in emplacements.raccourcis)
     # Inscription dans « Applications installées ».
     cle = emplacements.cle_desinstallation
-    assert lire(cle, "DisplayName") == "Pagilis"
+    assert lire(cle, "DisplayName") == "Pagilis PDF"
     assert lire(cle, "DisplayVersion") == "1.2.3"
     assert lire(cle, "UninstallString") == f'"{emplacements.exe}" --desinstaller'
     # « Ouvrir avec » pour les PDF.
@@ -171,7 +171,7 @@ def test_pdf_studio_install_becomes_pagilis(emplacements, ancienne, exe_portable
     assert nouveau == emplacements.exe and nouveau.exists()
     assert emplacements.raccourcis[0].exists()
     assert emplacements.raccourcis[1].exists() is bureau
-    assert lire(emplacements.cle_desinstallation, "DisplayName") == "Pagilis"
+    assert lire(emplacements.cle_desinstallation, "DisplayName") == "Pagilis PDF"
     assert lire(emplacements.cle_desinstallation, "DisplayVersion") == "1.2.0"
     assert cle_existe(rf"{emplacements.cle_classes}\Pagilis.pdf") is ouvrir_avec
     # Plus aucune trace de PDF Studio.
@@ -238,3 +238,41 @@ def test_failed_migration_does_not_block_the_app(monkeypatch):
 
     monkeypatch.setattr(inst, "migrer_depuis_pdf_studio", echec)
     assert pagilis.migrer_installation_pdf_studio([]) is False
+
+
+# ------------------------------------------------- nom affiché « Pagilis PDF »
+
+
+def test_install_uses_display_name(emplacements, exe_portable):
+    inst.installer(exe_portable, "1.7.1", emplacements=emplacements)
+    assert (emplacements.menu_demarrer / "Pagilis PDF.lnk").exists()
+    assert (emplacements.bureau / "Pagilis PDF.lnk").exists()
+    assert lire(emplacements.cle_desinstallation, "DisplayName") == "Pagilis PDF"
+    assert emplacements.exe.name == "Pagilis.exe"  # le fichier garde son nom
+
+
+def installation_sous_ancien_nom(emplacements, exe_portable, bureau=True):
+    """Installation faite par une version d'avant « Pagilis PDF » (raccourcis « Pagilis »)."""
+    ancienne = inst.Emplacements(**{**emplacements.__dict__, "nom": "Pagilis"})
+    inst.installer(exe_portable, "1.7.0", raccourci_bureau=bureau, emplacements=ancienne)
+    return ancienne
+
+
+@pytest.mark.parametrize("bureau", [True, False])
+def test_update_renames_shortcuts_and_windows_entry(emplacements, exe_portable, bureau):
+    installation_sous_ancien_nom(emplacements, exe_portable, bureau)
+    inst.mettre_a_jour_version("1.7.1", emplacements)
+    assert not (emplacements.menu_demarrer / "Pagilis.lnk").exists()
+    assert (emplacements.menu_demarrer / "Pagilis PDF.lnk").exists()
+    assert not (emplacements.bureau / "Pagilis.lnk").exists()
+    assert (emplacements.bureau / "Pagilis PDF.lnk").exists() is bureau  # le choix est gardé
+    assert lire(emplacements.cle_desinstallation, "DisplayName") == "Pagilis PDF"
+    assert lire(emplacements.cle_desinstallation, "DisplayVersion") == "1.7.1"
+    assert lire(rf"{emplacements.cle_classes}\{emplacements.progid}") == "Document PDF (Pagilis PDF)"
+
+
+def test_uninstall_also_removes_old_named_shortcuts(emplacements, exe_portable):
+    installation_sous_ancien_nom(emplacements, exe_portable)
+    inst.desinstaller(emplacements)
+    assert not (emplacements.menu_demarrer / "Pagilis.lnk").exists()
+    assert not (emplacements.bureau / "Pagilis.lnk").exists()

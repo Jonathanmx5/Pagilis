@@ -1,4 +1,4 @@
-# Pagilis
+# Pagilis PDF
 
 Application Windows pour lire, assembler, découper, signer et modifier des PDF,
 et rendre les scans cherchables (OCR).

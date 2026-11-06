@@ -15,6 +15,7 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image
 
+import identite
 import pdf_core as core
 import theme
 from pages.copie import PageCopie
@@ -185,7 +186,7 @@ class PageGestionPages(PageCopie):
                     return self.app.statut("Insertion annulée : mot de passe requis.")
             except Exception:  # noqa: BLE001 - PDF illisible : la copie de travail est intacte
                 logging.exception("Insertion impossible : %s", chemin)
-                return messagebox.showerror("Pagilis", f"Impossible d'insérer « {os.path.basename(chemin)} ».")
+                return messagebox.showerror(identite.NOM_AFFICHE, f"Impossible d'insérer « {os.path.basename(chemin)} ».")
         self.apercu.remplacer(self.edition.doc)
         self.selection = set(nouvelles)
         self._ancre = None

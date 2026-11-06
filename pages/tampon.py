@@ -11,6 +11,7 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image, ImageTk
 
+import identite
 import pdf_core as core
 import theme
 from pages.base import PageFonction
@@ -77,7 +78,7 @@ class PageTampon(PageFonction):
             with Image.open(chemin) as im:
                 self.ratio_tampon = im.height / im.width
         except OSError:
-            return messagebox.showerror("Pagilis", "Image illisible.")
+            return messagebox.showerror(identite.NOM_AFFICHE, "Image illisible.")
         self.image_tampon = chemin
         self.label_tampon.configure(text=os.path.basename(chemin), text_color=theme.TEXTE)
         self.apercu.redessiner()
@@ -144,7 +145,7 @@ class PageTampon(PageFonction):
         if not self.app.exiger_pdf():
             return
         if not self.image_tampon:
-            return messagebox.showinfo("Pagilis", "Choisissez d'abord une image.")
+            return messagebox.showinfo(identite.NOM_AFFICHE, "Choisissez d'abord une image.")
         try:
             opts = core.StampOptions(
                 x=float(self.entree_x.get()),
@@ -155,14 +156,14 @@ class PageTampon(PageFonction):
                 white_transparent=self.blanc_transparent.get(),
             )
         except ValueError:
-            return messagebox.showwarning("Pagilis", "Vérifiez les valeurs numériques.")
+            return messagebox.showwarning(identite.NOM_AFFICHE, "Vérifiez les valeurs numériques.")
         source = self.app.chemin_pdf
         image = self.image_tampon
         portee = self.portee_tampon.get()
         plage = self.entree_plage_tampon.get().strip()
         page_affichee = self.apercu.index
         if portee == "plage" and not plage:
-            return messagebox.showwarning("Pagilis", "Indiquez la plage de pages.")
+            return messagebox.showwarning(identite.NOM_AFFICHE, "Indiquez la plage de pages.")
         sortie = self.app.enregistrer_sous("signe")
         if not sortie:
             return

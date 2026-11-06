@@ -18,6 +18,7 @@ installent dans des dossiers et des clés de registre temporaires.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import shutil
 import subprocess
@@ -56,8 +57,9 @@ class Emplacements:
     bureau: Path = field(default_factory=lambda: _dossier_shell("Desktop", Path.home() / "Desktop"))
     cle_desinstallation: str = rf"{CLE_DESINSTALLATIONS}\{identite.CLE_REGISTRE}"
     cle_classes: str = CLE_CLASSES
-    nom: str = identite.NOM
+    nom: str = identite.NOM_AFFICHE   # raccourcis, « Applications installées »
     nom_exe: str = identite.NOM_EXE
+    anciens_noms: tuple = identite.ANCIENS_NOMS_AFFICHES  # raccourcis laissés par les versions d'avant
     progid: str = identite.PROGID_PDF
 
     @property
@@ -68,13 +70,19 @@ class Emplacements:
     def raccourcis(self) -> list[Path]:
         return [self.menu_demarrer / f"{self.nom}.lnk", self.bureau / f"{self.nom}.lnk"]
 
+    def anciens_raccourcis(self) -> list[tuple[Path, Path]]:
+        """(raccourci sous un ancien nom, raccourci sous le nom actuel), menu puis bureau."""
+        return [(dossier / f"{ancien}.lnk", dossier / f"{self.nom}.lnk")
+                for ancien in self.anciens_noms if ancien != self.nom
+                for dossier in (self.menu_demarrer, self.bureau)]
+
 
 def ancienne_installation(**autres) -> Emplacements:
     """Emplacements d'une installation de PDF Studio (avant le renommage en Pagilis)."""
     valeurs = dict(
         dossier=Path(os.environ["LOCALAPPDATA"]) / "Programs" / identite.ANCIEN_NOM,
         cle_desinstallation=rf"{CLE_DESINSTALLATIONS}\{identite.ANCIENNE_CLE_REGISTRE}",
-        nom=identite.ANCIEN_NOM, nom_exe=identite.ANCIEN_NOM_EXE, progid=identite.ANCIEN_PROGID_PDF,
+        nom=identite.ANCIEN_NOM, nom_exe=identite.ANCIEN_NOM_EXE, progid=identite.ANCIEN_PROGID_PDF, anciens_noms=(),
     )
     valeurs.update(autres)
     return Emplacements(**valeurs)
@@ -134,14 +142,33 @@ def installer(
 
 
 def mettre_a_jour_version(version: str, emplacements: Emplacements | None = None) -> None:
-    """Tient la version affichée dans « Applications installées » à jour (après une mise à jour)."""
+    """Après une mise à jour : version et nom affichés par Windows, raccourcis renommés."""
     e = emplacements or Emplacements()
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, e.cle_desinstallation, 0, winreg.KEY_ALL_ACCESS) as cle:
-            if winreg.QueryValueEx(cle, "DisplayVersion")[0] != version:
-                winreg.SetValueEx(cle, "DisplayVersion", 0, winreg.REG_SZ, version)
+            for nom, valeur in (("DisplayVersion", version), ("DisplayName", e.nom)):
+                if winreg.QueryValueEx(cle, nom)[0] != valeur:
+                    winreg.SetValueEx(cle, nom, 0, winreg.REG_SZ, valeur)
     except OSError:
-        pass  # pas installé : rien à faire
+        return  # pas installé : rien à faire
+    _renommer_raccourcis(e)
+    try:  # « Ouvrir avec » : le libellé suit le nom affiché
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{e.cle_classes}\{e.progid}", 0, winreg.KEY_ALL_ACCESS) as cle:
+            winreg.SetValueEx(cle, "", 0, winreg.REG_SZ, f"Document PDF ({e.nom})")
+    except OSError:
+        pass  # « Ouvrir avec » non choisi à l'installation
+
+
+def _renommer_raccourcis(e: Emplacements) -> None:
+    """Raccourcis d'un ancien nom affiché : recréés sous le nom actuel, au même endroit."""
+    for ancien, nouveau in e.anciens_raccourcis():
+        if not ancien.exists():
+            continue
+        try:
+            _creer_raccourci(nouveau, e.exe, e.nom)
+            ancien.unlink()
+        except OSError:
+            logging.exception("Raccourci %s non renommé", ancien)
 
 
 def _creer_raccourci(lien: Path, cible: Path, nom: str = identite.NOM) -> None:
@@ -240,7 +267,7 @@ def desinstaller(emplacements: Emplacements | None = None, attendre_pid: int | N
     interdit d'effacer un exe en cours d'exécution.
     """
     e = emplacements or Emplacements()
-    for lien in e.raccourcis:
+    for lien in e.raccourcis + [ancien for ancien, _nouveau in e.anciens_raccourcis()]:
         if lien.exists():
             lien.unlink()
     _retirer_ouvrir_avec(e)

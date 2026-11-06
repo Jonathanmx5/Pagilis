@@ -75,7 +75,7 @@ class Pagilis(ctk.CTk):
     def __init__(self):
         theme.appliquer()  # apparence sombre fixe ; un ancien réglage « apparence » est ignoré
         super().__init__(fg_color=theme.FOND)
-        self.title("Pagilis")
+        self.title(identite.NOM_AFFICHE)
         theme.poser_icone(self)
         self.geometry("1280x780")
         self.minsize(1080, 640)
@@ -169,7 +169,7 @@ class Pagilis(ctk.CTk):
         barre = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=52)
         barre.grid(row=0, column=0, columnspan=2, sticky="ew")
         barre.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(barre, text="  Pagilis", image=theme.logo(26), compound="left",
+        ctk.CTkLabel(barre, text=f"  {identite.NOM_AFFICHE}", image=theme.logo(26), compound="left",
                      font=theme.police(16, gras=True), text_color=theme.TEXTE).grid(row=0, column=0, padx=(16, 18), pady=10)
         ctk.CTkFrame(barre, width=1, height=22, fg_color=theme.BORDURE).grid(row=0, column=1)
         ctk.CTkLabel(barre, text="", image=theme.icone("document", 16, theme.TEXTE_2)).grid(
@@ -384,7 +384,7 @@ class Pagilis(ctk.CTk):
                 # Un mot de passe faux relève PasswordRequired : on redemande.
             except Exception:  # noqa: BLE001 - fichier illisible, on le dit sans planter
                 logging.exception("Ouverture impossible : %s", chemin)
-                messagebox.showerror("Pagilis", f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
+                messagebox.showerror(identite.NOM_AFFICHE, f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
                 return False
         self.chemin_pdf = chemin
         self.label_fichier.configure(text=os.path.basename(chemin))
@@ -404,7 +404,7 @@ class Pagilis(ctk.CTk):
 
     def exiger_pdf(self) -> bool:
         if not self.chemin_pdf:
-            messagebox.showinfo("Pagilis", "Ouvrez d'abord un PDF (bouton en haut à droite).")
+            messagebox.showinfo(identite.NOM_AFFICHE, "Ouvrez d'abord un PDF (bouton en haut à droite).")
             return False
         return True
 
@@ -431,12 +431,12 @@ class Pagilis(ctk.CTk):
                 self.after(0, lambda: self._relancer_avec_mot_de_passe(chemin, travail, fin))
             except core.PagilisError as exc:
                 message = str(exc)
-                self.after(0, lambda: messagebox.showwarning("Pagilis", message))
+                self.after(0, lambda: messagebox.showwarning(identite.NOM_AFFICHE, message))
                 self.after(0, lambda: self.statut(message))
             except Exception:  # noqa: BLE001 - tout doit finir dans le journal
                 logging.error(traceback.format_exc())
                 self.after(0, lambda: messagebox.showerror(
-                    "Pagilis", "Erreur inattendue. Détails dans pagilis.log."))
+                    identite.NOM_AFFICHE, "Erreur inattendue. Détails dans pagilis.log."))
             finally:
                 self.after(0, lambda: self.barre.set(0))
                 self.after(0, self._fin_travail)
@@ -558,7 +558,7 @@ def main() -> None:
         installation.mettre_a_jour_version(updater.APP_VERSION)
     if "--renomme" in arguments:
         app.after(800, lambda: messagebox.showinfo(
-            identite.NOM, f"{identite.ANCIEN_NOM} s'appelle désormais {identite.NOM}.\n\n"
+            identite.NOM_AFFICHE, f"{identite.ANCIEN_NOM} s'appelle désormais {identite.NOM_AFFICHE}.\n\n"
                           "Vos préférences sont conservées ; les raccourcis et l'entrée dans "
                           "« Applications installées » portent le nouveau nom."))
     # « Ouvrir avec Pagilis » ou PDF glissé sur l'exe : le chemin arrive en argument.

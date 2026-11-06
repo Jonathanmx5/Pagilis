@@ -7,6 +7,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+import identite
 import pdf_core as core
 from pages.base import PageFonction
 
@@ -40,9 +41,9 @@ class PageDivision(PageFonction):
         n = self.entree_n.get().strip()
         plages = self.entree_plages.get().strip()
         if mode == "n" and not n.isdigit():
-            return messagebox.showwarning("Pagilis", "Indiquez un nombre entier pour N.")
+            return messagebox.showwarning(identite.NOM_AFFICHE, "Indiquez un nombre entier pour N.")
         if mode == "plages" and not plages:
-            return messagebox.showwarning("Pagilis", "Indiquez les plages, par exemple « 1-3, 5, 8- ».")
+            return messagebox.showwarning(identite.NOM_AFFICHE, "Indiquez les plages, par exemple « 1-3, 5, 8- ».")
         dossier = filedialog.askdirectory(initialdir=self.app.dernier_dossier)
         if not dossier:
             return

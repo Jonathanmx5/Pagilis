@@ -28,29 +28,29 @@ def proposer_installation(app: "Pagilis"):
     """Fenêtre « Installer sur ce PC » (version portable uniquement)."""
     deja = installation.est_installe()
     fenetre = ctk.CTkToplevel(app)
-    fenetre.title("Installer Pagilis")
+    fenetre.title(f"Installer {identite.NOM_AFFICHE}")
     theme.poser_icone(fenetre)
     fenetre.geometry("480x330")
     fenetre.resizable(False, False)
     fenetre.transient(app)
     fenetre.grab_set()
-    ctk.CTkLabel(fenetre, text="Installer Pagilis sur ce PC",
+    ctk.CTkLabel(fenetre, text=f"Installer {identite.NOM_AFFICHE} sur ce PC",
                  font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", padx=24, pady=(22, 6))
     explication = (
-        "Pagilis sera copié dans votre dossier utilisateur et ajouté au menu Démarrer. "
+        f"{identite.NOM_AFFICHE} sera copié dans votre dossier utilisateur et ajouté au menu Démarrer. "
         "Aucun droit administrateur n'est nécessaire, et vous pourrez le désinstaller depuis "
         "« Paramètres > Applications installées ».\n\n"
         f"Emplacement : {installation.Emplacements().dossier}"
     )
     if deja:
-        explication += "\n\nPagilis est déjà installé : la copie installée sera remplacée par celle-ci."
+        explication += f"\n\n{identite.NOM_AFFICHE} est déjà installé : la copie installée sera remplacée par celle-ci."
     ctk.CTkLabel(fenetre, text=explication, wraplength=430, justify="left",
                  text_color=("gray30", "gray70")).pack(anchor="w", padx=24)
     bureau = ctk.BooleanVar(value=True)
     ouvrir_avec = ctk.BooleanVar(value=True)
     ctk.CTkCheckBox(fenetre, text="Créer un raccourci sur le Bureau", variable=bureau).pack(
         anchor="w", padx=24, pady=(14, 4))
-    ctk.CTkCheckBox(fenetre, text="Proposer Pagilis dans « Ouvrir avec » pour les PDF",
+    ctk.CTkCheckBox(fenetre, text=f"Proposer {identite.NOM_AFFICHE} dans « Ouvrir avec » pour les PDF",
                     variable=ouvrir_avec).pack(anchor="w", padx=24, pady=4)
     boutons = ctk.CTkFrame(fenetre, fg_color="transparent")
     boutons.pack(fill="x", side="bottom", padx=24, pady=20)
@@ -66,11 +66,11 @@ def _installer(app: "Pagilis", fenetre, bureau: bool, ouvrir_avec: bool):
         installe = installation.installer(installation.exe_courant(), updater.APP_VERSION,
                                           raccourci_bureau=bureau, ouvrir_avec=ouvrir_avec)
     except PermissionError:
-        return messagebox.showerror("Pagilis", "La version installée est ouverte. "
+        return messagebox.showerror(identite.NOM_AFFICHE, "La version installée est ouverte. "
                                                   "Fermez-la, puis recommencez.", parent=fenetre)
     except OSError as exc:
         logging.exception("Installation impossible")
-        return messagebox.showerror("Pagilis", f"Installation impossible :\n{exc}", parent=fenetre)
+        return messagebox.showerror(identite.NOM_AFFICHE, f"Installation impossible :\n{exc}", parent=fenetre)
     fenetre.destroy()
     logging.info("Installé dans %s", installe)
     # Une installation de PDF Studio (nom d'avant) ferait doublon : on la retire.
@@ -78,7 +78,7 @@ def _installer(app: "Pagilis", fenetre, bureau: bool, ouvrir_avec: bool):
     if ancienne.exe.exists():
         installation.desinstaller(ancienne)
         logging.info("Ancienne installation %s retirée", identite.ANCIEN_NOM)
-    if messagebox.askyesno("Pagilis", "Pagilis est installé.\n\n"
+    if messagebox.askyesno(identite.NOM_AFFICHE, f"{identite.NOM_AFFICHE} est installé.\n\n"
                                          "Fermer cette version portable et ouvrir la version installée ?"):
         subprocess.Popen([str(installe)], env=updater.environnement_lancement(), close_fds=True)
         app._fermer()
@@ -190,12 +190,12 @@ def desinstaller_avec_confirmation() -> None:
     racine = ctk.CTk()
     racine.withdraw()
     theme.poser_icone(racine)
-    if messagebox.askyesno("Désinstaller Pagilis",
-                           "Désinstaller Pagilis de ce PC ?\n\n"
+    if messagebox.askyesno(f"Désinstaller {identite.NOM_AFFICHE}",
+                           f"Désinstaller {identite.NOM_AFFICHE} de ce PC ?\n\n"
                            "Vos documents ne sont pas touchés. Vos préférences sont conservées.",
                            parent=racine):
         # Lancé depuis l'exe installé : son dossier n'est supprimé qu'après notre fermeture.
         depuis_installation = installation.tourne_depuis_installation()
         installation.desinstaller(attendre_pid=os.getpid() if depuis_installation else None)
-        messagebox.showinfo("Pagilis", "Pagilis a été désinstallé.", parent=racine)
+        messagebox.showinfo(identite.NOM_AFFICHE, f"{identite.NOM_AFFICHE} a été désinstallé.", parent=racine)
     racine.destroy()

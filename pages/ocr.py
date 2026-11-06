@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
+import identite
 import pdf_core as core
 import theme
 from pages.base import PageFonction
@@ -79,7 +80,7 @@ class PageOcr(PageFonction):
         # Préférences mémorisées pour les prochaines fois.
         self.app.config_data.update(langue_ocr=code, langue2_ocr=code2 or "aucune", tessdata=tessdata or "")
         if core.find_tessdata(tessdata) is None:
-            return messagebox.showwarning("Pagilis", "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
+            return messagebox.showwarning(identite.NOM_AFFICHE, "Fichiers de langue Tesseract (.traineddata) introuvables.\n"
                                                         "Indiquez le dossier « tessdata » qui les contient.")
         source = self.app.chemin_pdf
         sortie = self.app.enregistrer_sous("ocr")
@@ -102,7 +103,7 @@ class PageOcr(PageFonction):
     def _fin_ocr(self, n: int, sortie: str):
         if n == 0:
             self.app.statut("Aucune page traitée.")
-            return messagebox.showinfo("Pagilis", "Aucune page à traiter : toutes contiennent déjà du texte.\n"
+            return messagebox.showinfo(identite.NOM_AFFICHE, "Aucune page à traiter : toutes contiennent déjà du texte.\n"
                                                      "Décochez « Ignorer les pages qui ont déjà du texte » pour forcer.")
         self.encadrer_mots.set(True)
         self.app.apres_sauvegarde(sortie, f"Texte reconnu sur {n} page(s).")

@@ -13,6 +13,7 @@ import logging
 import os
 from tkinter import filedialog, messagebox
 
+import identite
 import theme
 from edition import Edition, ecrire_pdf
 from pages.base import PageFonction
@@ -70,10 +71,10 @@ class PageCopie(PageFonction):
         except Exception as exc:  # noqa: BLE001 - la copie de travail est déjà restaurée
             from pdf_core import PagilisError
             if isinstance(exc, PagilisError):
-                messagebox.showwarning("Pagilis", str(exc))
+                messagebox.showwarning(identite.NOM_AFFICHE, str(exc))
             else:
                 logging.exception("Retouche impossible")
-                messagebox.showerror("Pagilis", "Retouche impossible, le document n'a pas changé.")
+                messagebox.showerror(identite.NOM_AFFICHE, "Retouche impossible, le document n'a pas changé.")
             resultat = None
         self.apercu.remplacer(self.edition.doc)
         self.maj_etat()
@@ -89,9 +90,9 @@ class PageCopie(PageFonction):
             if isinstance(page, PageCopie):
                 page.edition_changee()
         if ed and ed.modifie:
-            self.app.title(f"Pagilis • {os.path.basename(ed.source)}")
+            self.app.title(f"{identite.NOM_AFFICHE} • {os.path.basename(ed.source)}")
         else:
-            self.app.title("Pagilis")
+            self.app.title(identite.NOM_AFFICHE)
 
     def annuler_retouche(self):
         if self.edition is None or not self.edition.peut_annuler or self.app.travaux_en_cours:
@@ -139,7 +140,7 @@ class PageCopie(PageFonction):
         ed = self.edition
         if ed is None or not ed.modifie:
             return True
-        reponse = messagebox.askyesnocancel("Pagilis", "Enregistrer les modifications ?")
+        reponse = messagebox.askyesnocancel(identite.NOM_AFFICHE, "Enregistrer les modifications ?")
         if reponse is None:
             return False
         if reponse:
@@ -150,7 +151,7 @@ class PageCopie(PageFonction):
                 ed.enregistrer(chemin)
             except Exception:  # noqa: BLE001 - on reste sur place, rien n'est perdu
                 logging.exception("Enregistrement impossible : %s", chemin)
-                messagebox.showerror("Pagilis", f"Impossible d'enregistrer « {os.path.basename(chemin)} ».")
+                messagebox.showerror(identite.NOM_AFFICHE, f"Impossible d'enregistrer « {os.path.basename(chemin)} ».")
                 return False
             self._apres_enregistrement(chemin)
         elif abandonner:

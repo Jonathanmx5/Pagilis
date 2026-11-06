@@ -323,7 +323,7 @@ def test_business_error_is_shown_not_crashing(ui, contrat, tmp_path):
         app.fonctions["Division"].lancer_division()
         yield TRAVAUX
         yield 100
-        assert ("showwarning", "Pagilis", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
+        assert ("showwarning", "Pagilis PDF", "« 1-9 » sort du document (1 à 2 pages).") in d.messages
 
     executer(app, scenario)
 
@@ -479,7 +479,7 @@ def test_word_conversion_error_is_shown(ui, tmp_path, monkeypatch):
         app.ouvrir_document(str(tmp_path / "a.docx"))
         yield TRAVAUX
         assert app.edition is None
-        assert ("showwarning", "Pagilis", message) in d.messages
+        assert ("showwarning", "Pagilis PDF", message) in d.messages
 
     executer(app, scenario)
 
@@ -1062,3 +1062,9 @@ def test_opened_files_become_recent(ui, contrat, cinq_pages):
         assert app.config_data["recents"][:2] == [str(cinq_pages), str(contrat)]
 
     executer(app, scenario)
+
+
+def test_window_shows_display_name(ui):
+    s, creer, d = ui
+    app = creer()
+    assert app.title() == "Pagilis PDF"

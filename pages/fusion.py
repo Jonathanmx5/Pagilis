@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+import identite
 import pdf_core as core
 import theme
 from pages.base import PageFonction
@@ -90,7 +91,7 @@ class PageFusion(PageFonction):
     def lancer_fusion(self):
         fichiers = list(self.liste_fusion)
         if len(fichiers) < 2:
-            return messagebox.showinfo("Pagilis", "Ajoutez au moins deux PDF à fusionner.")
+            return messagebox.showinfo(identite.NOM_AFFICHE, "Ajoutez au moins deux PDF à fusionner.")
         sortie = filedialog.asksaveasfilename(initialdir=self.app.dernier_dossier, initialfile="fusion.pdf",
                                               defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
         if not sortie:
