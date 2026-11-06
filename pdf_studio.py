@@ -7,6 +7,8 @@ import io
 import json
 import logging
 import os
+import subprocess
+import sys
 import threading
 import traceback
 from tkinter import filedialog, messagebox, simpledialog
@@ -15,6 +17,7 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image, ImageTk
 
+import installation
 import pdf_core as core
 import updater
 from apercu import Apercu
@@ -188,10 +191,18 @@ class PDFStudio(ctk.CTk):
             bouton.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
             self.boutons_nav[nom] = bouton
 
-        # Pousse le choix du thème tout en bas de la barre.
-        barre.grid_rowconfigure(3 + len(FONCTIONS), weight=1)
+        # Pousse le bas de la barre (installation, thème, aide) tout en bas.
+        bas = 4 + len(FONCTIONS)
+        barre.grid_rowconfigure(bas - 1, weight=1)
+        # Version portable lancée : on propose de l'installer sur le PC.
+        if installation.exe_courant() and not installation.tourne_depuis_installation():
+            texte = "Réinstaller sur ce PC" if installation.est_installe() else "⬇  Installer sur ce PC"
+            ctk.CTkButton(barre, text=texte, height=34, fg_color=("#2F9E44", "#2B8A3E"),
+                          hover_color=("#2B8A3E", "#237032"), command=self.proposer_installation).grid(
+                row=bas, column=0, sticky="ew", padx=20, pady=(0, 16))
+        bas += 1
         ctk.CTkLabel(barre, text="Apparence", anchor="w", text_color=("gray40", "gray60")).grid(
-            row=4 + len(FONCTIONS), column=0, sticky="ew", padx=20)
+            row=bas, column=0, sticky="ew", padx=20)
         themes = {"Système": "system", "Clair": "light", "Sombre": "dark"}
         actuel = self.config_data.get("apparence", "system")
         menu = ctk.CTkOptionMenu(
@@ -199,11 +210,63 @@ class PDFStudio(ctk.CTk):
             command=lambda choix: self._changer_apparence(themes[choix]),
         )
         menu.set(next(k for k, v in themes.items() if v == actuel))
-        menu.grid(row=5 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 8))
+        menu.grid(row=bas + 1, column=0, sticky="ew", padx=20, pady=(4, 8))
         ctk.CTkButton(barre, text="Aide et limites", fg_color="transparent", border_width=1,
                       text_color=("gray10", "gray90"), command=self.afficher_aide).grid(
-            row=6 + len(FONCTIONS), column=0, sticky="ew", padx=20, pady=(4, 20))
+            row=bas + 2, column=0, sticky="ew", padx=20, pady=(4, 20))
         ctk.set_appearance_mode(actuel)
+
+    # ------------------------------------------------- installation sur le PC
+
+    def proposer_installation(self):
+        """Fenêtre « Installer sur ce PC » (version portable uniquement)."""
+        deja = installation.est_installe()
+        fenetre = ctk.CTkToplevel(self)
+        fenetre.title("Installer PDF Studio")
+        fenetre.geometry("480x330")
+        fenetre.resizable(False, False)
+        fenetre.transient(self)
+        fenetre.grab_set()
+        ctk.CTkLabel(fenetre, text="Installer PDF Studio sur ce PC",
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", padx=24, pady=(22, 6))
+        explication = (
+            "PDF Studio sera copié dans votre dossier utilisateur et ajouté au menu Démarrer. "
+            "Aucun droit administrateur n'est nécessaire, et vous pourrez le désinstaller depuis "
+            "« Paramètres > Applications installées ».\n\n"
+            f"Emplacement : {installation.Emplacements().dossier}"
+        )
+        if deja:
+            explication += "\n\nPDF Studio est déjà installé : la copie installée sera remplacée par celle-ci."
+        ctk.CTkLabel(fenetre, text=explication, wraplength=430, justify="left",
+                     text_color=("gray30", "gray70")).pack(anchor="w", padx=24)
+        bureau = ctk.BooleanVar(value=True)
+        ouvrir_avec = ctk.BooleanVar(value=True)
+        ctk.CTkCheckBox(fenetre, text="Créer un raccourci sur le Bureau", variable=bureau).pack(anchor="w", padx=24, pady=(14, 4))
+        ctk.CTkCheckBox(fenetre, text="Proposer PDF Studio dans « Ouvrir avec » pour les PDF",
+                        variable=ouvrir_avec).pack(anchor="w", padx=24, pady=4)
+        boutons = ctk.CTkFrame(fenetre, fg_color="transparent")
+        boutons.pack(fill="x", side="bottom", padx=24, pady=20)
+        ctk.CTkButton(boutons, text="Annuler", width=100, fg_color="gray50", hover_color="gray40",
+                      command=fenetre.destroy).pack(side="right")
+        ctk.CTkButton(boutons, text="Installer", width=120,
+                      command=lambda: self._installer(fenetre, bureau.get(), ouvrir_avec.get())).pack(side="right", padx=8)
+
+    def _installer(self, fenetre, bureau: bool, ouvrir_avec: bool):
+        try:
+            installe = installation.installer(installation.exe_courant(), updater.APP_VERSION,
+                                              raccourci_bureau=bureau, ouvrir_avec=ouvrir_avec)
+        except PermissionError:
+            return messagebox.showerror("PDF Studio", "La version installée est ouverte. "
+                                                      "Fermez-la, puis recommencez.", parent=fenetre)
+        except OSError as exc:
+            logging.exception("Installation impossible")
+            return messagebox.showerror("PDF Studio", f"Installation impossible :\n{exc}", parent=fenetre)
+        fenetre.destroy()
+        logging.info("Installé dans %s", installe)
+        if messagebox.askyesno("PDF Studio", "PDF Studio est installé.\n\n"
+                                             "Fermer cette version portable et ouvrir la version installée ?"):
+            subprocess.Popen([str(installe)], env=updater.environnement_lancement(), close_fds=True)
+            self._fermer()
 
     def _changer_apparence(self, mode: str):
         ctk.set_appearance_mode(mode)
@@ -1088,10 +1151,36 @@ class PDFStudio(ctk.CTk):
         self._geste = None
 
 
+def desinstaller_avec_confirmation() -> None:
+    """« PDFStudio.exe --desinstaller », lancé par Windows (Applications installées)."""
+    racine = ctk.CTk()
+    racine.withdraw()
+    if messagebox.askyesno("Désinstaller PDF Studio",
+                           "Désinstaller PDF Studio de ce PC ?\n\n"
+                           "Vos documents ne sont pas touchés. Vos préférences sont conservées.",
+                           parent=racine):
+        # Lancé depuis l'exe installé : son dossier n'est supprimé qu'après notre fermeture.
+        depuis_installation = installation.tourne_depuis_installation()
+        installation.desinstaller(attendre_pid=os.getpid() if depuis_installation else None)
+        messagebox.showinfo("PDF Studio", "PDF Studio a été désinstallé.", parent=racine)
+    racine.destroy()
+
+
 def main() -> None:
+    arguments = sys.argv[1:]
+    if "--desinstaller" in arguments:
+        return desinstaller_avec_confirmation()
     ctk.set_appearance_mode("system")
     ctk.set_default_color_theme("blue")
-    PDFStudio().mainloop()
+    app = PDFStudio()
+    if installation.tourne_depuis_installation():
+        # Après une mise à jour automatique, la version affichée par Windows doit suivre.
+        installation.mettre_a_jour_version(updater.APP_VERSION)
+    # « Ouvrir avec PDF Studio » ou PDF glissé sur l'exe : le chemin arrive en argument.
+    fichiers = [a for a in arguments if a.lower().endswith(".pdf") and os.path.isfile(a)]
+    if fichiers:
+        app.after(200, lambda: app.charger_fichier(os.path.abspath(fichiers[0])))
+    app.mainloop()
 
 
 if __name__ == "__main__":

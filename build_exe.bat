@@ -19,7 +19,7 @@ if not exist "tessdata\eng.traineddata" (
 )
 
 echo [3/4] Analyse du code et tests automatises...
-python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py tests || goto :erreur
+python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py installation.py tests || goto :erreur
 python -m pytest tests -q || goto :erreur
 
 echo [4/4] Compilation PyInstaller...

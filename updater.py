@@ -35,6 +35,14 @@ UPDATE_MANIFEST_URL = f"https://github.com/{GITHUB_REPO}/releases/latest/downloa
 
 TIMEOUT_SECONDES = 10
 
+# Ligne de script .bat qui boucle tant que le processus %PID% tourne.
+# - tasklist/find par chemin complet : un `find` Unix (Git) dans le PATH répondrait faux ;
+# - ping comme pause : `timeout` échoue aussitôt dans un script lancé sans console.
+ATTENTE_PROCESSUS = (
+    r'"%SystemRoot%\System32\tasklist.exe" /FI "PID eq %PID%" | "%SystemRoot%\System32\find.exe" "%PID%" >nul'
+    r" && (ping -n 2 127.0.0.1 >nul & goto attente)" "\r\n"
+)
+
 
 @dataclass
 class Update:
@@ -128,12 +136,24 @@ def install_and_restart(new_exe: str) -> None:
     with open(script, "w", encoding="utf-8") as fh:
         fh.write(
             "@echo off\r\n"
+            "chcp 65001 >nul\r\n"  # le fichier est en UTF-8 : chemins accentués compris
             f"set PID={os.getpid()}\r\n"
             ":attente\r\n"
-            'tasklist /FI "PID eq %PID%" | find "%PID%" >nul && (timeout /t 1 >nul & goto attente)\r\n'
+            + ATTENTE_PROCESSUS +
             ":remplacer\r\n"
-            f'move /Y "{new_exe}" "{actuel}" >nul 2>&1 || (timeout /t 1 >nul & goto remplacer)\r\n'
+            f'move /Y "{new_exe}" "{actuel}" >nul 2>&1 || (ping -n 2 127.0.0.1 >nul & goto remplacer)\r\n'
             f'start "" "{actuel}"\r\n'
             'del "%~f0"\r\n'
         )
-    subprocess.Popen(["cmd", "/c", script], creationflags=subprocess.CREATE_NO_WINDOW)
+    subprocess.Popen(["cmd", "/c", script], env=environnement_lancement(),
+                     creationflags=subprocess.CREATE_NO_WINDOW)
+
+
+def environnement_lancement() -> dict:
+    """Environnement pour lancer un AUTRE exe PDF Studio depuis celui-ci.
+
+    Sans PYINSTALLER_RESET_ENVIRONMENT, le nouvel exe hériterait des variables
+    internes de PyInstaller et pourrait réutiliser notre dossier temporaire,
+    effacé dès notre fermeture.
+    """
+    return dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")

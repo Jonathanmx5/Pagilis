@@ -8,6 +8,16 @@ et rendre les scans cherchables (OCR).
 Dernière version : [Releases](https://github.com/Jonathanmx5/PDFStudio/releases/latest).
 L'application vérifie elle-même les mises à jour à chaque démarrage.
 
+**Portable** : `PDFStudio.exe` se lance tel quel, sans installation (clé USB,
+dossier Téléchargements…).
+
+**Installation** (facultative) : depuis la version portable, bouton
+**Installer sur ce PC** en bas de la barre latérale. Sans droits
+administrateur : copie dans `%LOCALAPPDATA%\Programs\PDF Studio`, raccourcis
+menu Démarrer et Bureau, PDF Studio proposé dans « Ouvrir avec » pour les PDF.
+Désinstallation depuis *Paramètres > Applications installées* ; les
+préférences (`%LOCALAPPDATA%\PDFStudio`) sont conservées.
+
 ## Développer
 
 ```bat
@@ -19,6 +29,7 @@ python pdf_studio.py
 - `pdf_core.py` : toute la logique PDF, sans interface (testée).
 - `pdf_studio.py`, `apercu.py` : l'interface.
 - `updater.py` : vérification et installation des mises à jour.
+- `installation.py` : installation sur le PC depuis la version portable.
 
 Les versions des dépendances sont figées dans `requirements*.txt` : on les
 met à jour volontairement, puis on relance les tests.

@@ -42,7 +42,7 @@ jobs:
           }
 
       - name: Analyse du code
-        run: python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py tests
+        run: python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py installation.py tests
 
       - name: Tests
         run: python -m pytest tests -q
