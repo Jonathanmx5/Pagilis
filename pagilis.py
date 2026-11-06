@@ -78,6 +78,8 @@ class Pagilis(ctk.CTk):
     """Fenêtre principale : fonctions dans une barre à gauche, page de travail à droite."""
 
     def __init__(self):
+        # Apparence sombre, fixe (pas de choix ; un ancien réglage « apparence » est ignoré).
+        ctk.set_appearance_mode("dark")
         super().__init__()
         self.title("Pagilis")
         self.geometry("1280x780")
@@ -197,7 +199,7 @@ class Pagilis(ctk.CTk):
             bouton.grid(row=3 + i, column=0, sticky="ew", padx=12, pady=2)
             self.boutons_nav[nom] = bouton
 
-        # Pousse le bas de la barre (installation, thème) tout en bas.
+        # Pousse le bouton d'installation tout en bas de la barre.
         bas = 4 + len(FONCTIONS)
         barre.grid_rowconfigure(bas - 1, weight=1)
         # Version portable lancée : on propose de l'installer sur le PC.
@@ -205,19 +207,7 @@ class Pagilis(ctk.CTk):
             texte = "Réinstaller sur ce PC" if installation.est_installe() else "⬇  Installer sur ce PC"
             ctk.CTkButton(barre, text=texte, height=34, fg_color=("#2F9E44", "#2B8A3E"),
                           hover_color=("#2B8A3E", "#237032"), command=self.proposer_installation).grid(
-                row=bas, column=0, sticky="ew", padx=20, pady=(0, 16))
-        bas += 1
-        ctk.CTkLabel(barre, text="Apparence", anchor="w", text_color=("gray40", "gray60")).grid(
-            row=bas, column=0, sticky="ew", padx=20)
-        themes = {"Système": "system", "Clair": "light", "Sombre": "dark"}
-        actuel = self.config_data.get("apparence", "system")
-        menu = ctk.CTkOptionMenu(
-            barre, values=list(themes),
-            command=lambda choix: self._changer_apparence(themes[choix]),
-        )
-        menu.set(next(k for k, v in themes.items() if v == actuel))
-        menu.grid(row=bas + 1, column=0, sticky="ew", padx=20, pady=(4, 20))
-        ctk.set_appearance_mode(actuel)
+                row=bas, column=0, sticky="ew", padx=20, pady=(0, 20))
 
     # ------------------------------------------------- installation sur le PC
 
@@ -275,11 +265,6 @@ class Pagilis(ctk.CTk):
                                              "Fermer cette version portable et ouvrir la version installée ?"):
             subprocess.Popen([str(installe)], env=updater.environnement_lancement(), close_fds=True)
             self._fermer()
-
-    def _changer_apparence(self, mode: str):
-        ctk.set_appearance_mode(mode)
-        self.config_data["apparence"] = mode
-        self.apercu.changer_theme()
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
@@ -1451,7 +1436,6 @@ def main() -> None:
                                        DOSSIER_DONNEES)
     if migrer_installation_pdf_studio(arguments):
         return  # la version installée sous le nouveau nom a pris le relais
-    ctk.set_appearance_mode("system")
     ctk.set_default_color_theme("blue")
     app = Pagilis()
     if installation.tourne_depuis_installation():

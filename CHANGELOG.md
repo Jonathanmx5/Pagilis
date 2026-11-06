@@ -20,6 +20,8 @@ elle n'a pas de section propre.
   en PDF avec Microsoft Word, ou LibreOffice s'il n'y a pas Word.
 - Pagilis prévient avant de fermer ou d'ouvrir un autre fichier si des
   retouches ne sont pas enregistrées.
+- Apparence sombre pour tous ; le choix « Apparence » est retiré de la barre
+  latérale.
 
 ## [1.2.0]
 

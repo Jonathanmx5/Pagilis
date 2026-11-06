@@ -217,7 +217,3 @@ class Apercu(ctk.CTkFrame):
             self.after_cancel(self._rendu_prevu)
             self._rendu_prevu = None
         super().destroy()
-
-    def changer_theme(self):
-        self._appliquer_couleurs()
-        self._planifier_rendu()
