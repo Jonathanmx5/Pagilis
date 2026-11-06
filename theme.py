@@ -40,6 +40,44 @@ POLICE = "Segoe UI"
 _POLICE_ICONES = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts", "segmdl2.ttf")
 
 
+def chemin_ressource(nom: str) -> str:
+    """Fichier du dossier ressources/, dans les sources comme dans l'exe compilé."""
+    import sys
+    racine = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(racine, "ressources", nom)
+
+
+ICONE_APPLICATION = chemin_ressource("pagilis.ico")
+
+
+def logo(taille: int) -> ctk.CTkImage | None:
+    """Le logo (page bleue et « Pdf »), à afficher dans l'interface."""
+    chemin = chemin_ressource("logo.png")
+    if not os.path.exists(chemin):
+        return None
+    image = Image.open(chemin)
+    return ctk.CTkImage(light_image=image, dark_image=image, size=(taille, taille))
+
+
+def poser_icone(fenetre):
+    """Icône de fenêtre (barre de titre, barre des tâches).
+
+    CustomTkinter impose la sienne environ 200 ms après la création de la
+    fenêtre : on repasse derrière.
+    """
+    if not os.path.exists(ICONE_APPLICATION):
+        return
+
+    def poser():
+        try:
+            fenetre.iconbitmap(ICONE_APPLICATION)
+        except Exception:  # noqa: BLE001 - fenêtre déjà fermée : sans importance
+            pass
+
+    poser()
+    fenetre.after(300, poser)
+
+
 def police(taille: int = 13, gras: bool = False) -> ctk.CTkFont:
     return ctk.CTkFont(family=POLICE, size=taille, weight="bold" if gras else "normal")
 

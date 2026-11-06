@@ -89,6 +89,8 @@ python pagilis.py
 - `apercu.py` : l'aperçu ; `fenetres.py` : mise à jour, installation, désinstallation.
 - `theme.py` : couleurs, polices (Segoe UI), icônes (Segoe MDL2 Assets) et boutons ;
   aucune couleur ni police n'est écrite ailleurs.
+- `ressources/` : le logo (`logo.png`) et l'icône Windows (`pagilis.ico`), produits par
+  `python outils/dessiner_logo.py`.
 - `edition.py` : copie de travail de « Modifier » ; `conversion.py` : Word → PDF.
 - `updater.py` : vérification et installation des mises à jour.
 - `installation.py` : installation sur le PC depuis la version portable.

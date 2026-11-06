@@ -11,6 +11,11 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.7.0]
+
+- Nouveau logo : une page bleue au coin plié, avec « Pdf ». Il apparaît dans
+  la barre des tâches, sur l'exe, les raccourcis, la barre du haut et l'accueil.
+
 ## [1.6.0]
 
 - Nouvelle présentation, plus claire et plus professionnelle : police et icônes

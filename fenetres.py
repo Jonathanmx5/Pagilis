@@ -14,6 +14,7 @@ import customtkinter as ctk
 
 import identite
 import installation
+import theme
 import updater
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -28,6 +29,7 @@ def proposer_installation(app: "Pagilis"):
     deja = installation.est_installe()
     fenetre = ctk.CTkToplevel(app)
     fenetre.title("Installer Pagilis")
+    theme.poser_icone(fenetre)
     fenetre.geometry("480x330")
     fenetre.resizable(False, False)
     fenetre.transient(app)
@@ -89,6 +91,7 @@ def popup_mise_a_jour(app: "Pagilis", mise_a_jour: updater.Update):
     """Popup facultatif : « Plus tard » ou la croix ferment le popup sans rien installer."""
     popup = ctk.CTkToplevel(app)
     popup.title("Mise à jour disponible")
+    theme.poser_icone(popup)
     popup.geometry("460x440" if mise_a_jour.notes else "420x260")
     popup.resizable(False, False)
     popup.transient(app)
@@ -186,6 +189,7 @@ def desinstaller_avec_confirmation() -> None:
     """« Pagilis.exe --desinstaller », lancé par Windows (Applications installées)."""
     racine = ctk.CTk()
     racine.withdraw()
+    theme.poser_icone(racine)
     if messagebox.askyesno("Désinstaller Pagilis",
                            "Désinstaller Pagilis de ce PC ?\n\n"
                            "Vos documents ne sont pas touchés. Vos préférences sont conservées.",

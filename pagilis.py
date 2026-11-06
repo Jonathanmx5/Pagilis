@@ -76,6 +76,7 @@ class Pagilis(ctk.CTk):
         theme.appliquer()  # apparence sombre fixe ; un ancien réglage « apparence » est ignoré
         super().__init__(fg_color=theme.FOND)
         self.title("Pagilis")
+        theme.poser_icone(self)
         self.geometry("1280x780")
         self.minsize(1080, 640)
         self.config_data = charger_config()
@@ -168,8 +169,8 @@ class Pagilis(ctk.CTk):
         barre = ctk.CTkFrame(self, fg_color=theme.SURFACE, corner_radius=0, height=52)
         barre.grid(row=0, column=0, columnspan=2, sticky="ew")
         barre.grid_columnconfigure(3, weight=1)
-        ctk.CTkLabel(barre, text="Pagilis", font=theme.police(16, gras=True), text_color=theme.TEXTE).grid(
-            row=0, column=0, padx=(18, 18), pady=10)
+        ctk.CTkLabel(barre, text="  Pagilis", image=theme.logo(26), compound="left",
+                     font=theme.police(16, gras=True), text_color=theme.TEXTE).grid(row=0, column=0, padx=(16, 18), pady=10)
         ctk.CTkFrame(barre, width=1, height=22, fg_color=theme.BORDURE).grid(row=0, column=1)
         ctk.CTkLabel(barre, text="", image=theme.icone("document", 16, theme.TEXTE_2)).grid(
             row=0, column=2, padx=(16, 6))
@@ -251,7 +252,7 @@ class Pagilis(ctk.CTk):
             enfant.destroy()
         centre = ctk.CTkFrame(self.accueil, fg_color="transparent")
         centre.place(relx=0.5, rely=0.42, anchor="center")
-        ctk.CTkLabel(centre, text="", image=theme.icone("document", 44, theme.TEXTE_DISCRET)).pack(pady=(0, 14))
+        ctk.CTkLabel(centre, text="", image=theme.logo(84)).pack(pady=(0, 16))
         ctk.CTkLabel(centre, text="Ouvrez un document pour commencer", font=theme.police(20, gras=True),
                      text_color=theme.TEXTE).pack()
         ctk.CTkLabel(centre, text="Un PDF ou un document Word. Raccourci : Ctrl+O.", font=theme.police(13),

@@ -19,7 +19,7 @@ if not exist "tessdata\eng.traineddata" (
 )
 
 echo [3/5] Analyse du code et tests automatises...
-python -m pyflakes pdf_core.py pagilis.py apercu.py updater.py installation.py verification.py publication.py identite.py edition.py conversion.py fenetres.py theme.py pages tests || goto :erreur
+python -m pyflakes pdf_core.py pagilis.py apercu.py updater.py installation.py verification.py publication.py identite.py edition.py conversion.py fenetres.py theme.py outils pages tests || goto :erreur
 python -m pytest tests -q || goto :erreur
 
 echo [4/5] Compilation PyInstaller...
@@ -28,6 +28,7 @@ rem Les --exclude-module retirent des dependances de PyMuPDF 2.x jamais chargees
 rem l'application (numpy, onnxruntime...) : l'exe s'allege, et --verifier le controle.
 python -m PyInstaller --onefile --noconsole --noconfirm --name Pagilis ^
     --collect-all customtkinter --add-data "tessdata;tessdata" --add-data "LICENSE;." ^
+    --icon "ressources\pagilis.ico" --add-data "ressources;ressources" ^
     --exclude-module numpy --exclude-module onnxruntime --exclude-module networkx ^
     --exclude-module pymupdf4llm --exclude-module pymupdf_layout --exclude-module yaml ^
     --exclude-module tabulate --exclude-module psutil ^
