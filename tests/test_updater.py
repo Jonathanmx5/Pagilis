@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tests de la vérification de mise à jour (sans réseau réel)."""
 
 import hashlib

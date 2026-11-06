@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Tests automatisés de pdf_core, sur des PDF générés à la volée."""
 
 import os

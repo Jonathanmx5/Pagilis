@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Vérification et installation des mises à jour de PDF Studio.
 
 Aucune interface ici : le module est testable sans écran.
@@ -22,9 +23,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+# Version de l'exe. À la publication, la CI la remplace par celle du tag git
+# (v1.2.3 -> "1.2.3") : ne la modifiez pas à la main pour sortir une version.
 APP_VERSION = "1.0.1"
 
-# Dépôt GitHub qui héberge les versions publiées (voir release.py).
+# Dépôt GitHub qui héberge les versions publiées (voir .github/workflows/release.yml).
 GITHUB_REPO = "Jonathanmx5/PDFStudio"
 
 # Fichier de version joint à la DERNIÈRE release GitHub. Vide = pas de vérification.

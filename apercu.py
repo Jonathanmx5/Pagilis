@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Aperçu de page partagé : rendu, navigation, zoom et interactions souris.
 
 Les coordonnées échangées avec le reste de l'application sont des points PDF

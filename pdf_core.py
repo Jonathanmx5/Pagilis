@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Cœur de PDF Studio : toute la logique PDF, sans aucun import d'interface.
 
 Conventions :

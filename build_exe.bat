@@ -1,11 +1,12 @@
 @echo off
-rem Construit dist\PDFStudio.exe : installe les dépendances, récupère les
-rem fichiers de langue Tesseract si absents, lance les tests puis PyInstaller.
+rem Construit dist\PDFStudio.exe : installe les dependances (versions figees),
+rem recupere les fichiers de langue Tesseract si absents, verifie le code
+rem (analyse + tests) puis lance PyInstaller. Utilise tel quel par la CI GitHub.
 setlocal
 cd /d "%~dp0"
 
 echo [1/4] Installation des dependances...
-python -m pip install -r requirements.txt || goto :erreur
+python -m pip install -r requirements-dev.txt || goto :erreur
 
 echo [2/4] Fichiers de langue Tesseract (tessdata_fast)...
 if not exist tessdata mkdir tessdata
@@ -17,12 +18,15 @@ if not exist "tessdata\eng.traineddata" (
     curl -L -o "tessdata\eng.traineddata" "%BASE%/eng.traineddata" || goto :erreur
 )
 
-echo [3/4] Tests automatises...
+echo [3/4] Analyse du code et tests automatises...
+python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py tests || goto :erreur
 python -m pytest tests -q || goto :erreur
 
 echo [4/4] Compilation PyInstaller...
-python -m PyInstaller --onefile --noconsole --name PDFStudio ^
-    --collect-all customtkinter --add-data "tessdata;tessdata" pdf_studio.py || goto :erreur
+rem LICENSE est embarquee dans l'exe : l'AGPL impose de fournir la licence avec chaque copie.
+python -m PyInstaller --onefile --noconsole --noconfirm --name PDFStudio ^
+    --collect-all customtkinter --add-data "tessdata;tessdata" --add-data "LICENSE;." ^
+    pdf_studio.py || goto :erreur
 
 echo.
 echo Termine : dist\PDFStudio.exe

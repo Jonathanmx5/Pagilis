@@ -1,0 +1,48 @@
+# Vérifie chaque push et chaque pull request : analyse du code et tests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Dépendances (versions figées)
+        run: python -m pip install -r requirements-dev.txt
+
+      # Les tests OCR ne tournent que si les fichiers de langue sont présents.
+      - name: Cache des fichiers de langue Tesseract
+        uses: actions/cache@v4
+        with:
+          path: tessdata
+          key: tessdata-fast-fra-eng-v1
+
+      - name: Fichiers de langue Tesseract
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tessdata | Out-Null
+          foreach ($l in "fra", "eng") {
+            if (-not (Test-Path "tessdata/$l.traineddata")) {
+              Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$l.traineddata" -OutFile "tessdata/$l.traineddata"
+            }
+          }
+
+      - name: Analyse du code
+        run: python -m pyflakes pdf_core.py pdf_studio.py apercu.py updater.py tests
+
+      - name: Tests
+        run: python -m pytest tests -q

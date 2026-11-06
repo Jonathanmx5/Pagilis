@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Interface de PDF Studio (CustomTkinter). Toute la logique est dans pdf_core."""
 
 from __future__ import annotations
@@ -31,7 +32,14 @@ LIMITES = """Limites connues de PDF Studio
   ne sont pas encore disponibles.
 • Un .exe non signé peut être signalé par Windows Defender.
 
+Licence : PDF Studio est un logiciel libre distribué sous licence
+GNU AGPL-3.0, comme la bibliothèque PyMuPDF qu'il utilise. Il est fourni
+sans aucune garantie. Code source : {source}
+
 Journal d'erreurs : {log}"""
+
+# Dépôt du code source, exigé par l'AGPL pour toute copie distribuée.
+URL_SOURCE = f"https://github.com/{updater.GITHUB_REPO}"
 
 # Dossier de configuration et journal, indispensables avec --noconsole.
 DOSSIER_DONNEES = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "PDFStudio")
@@ -203,7 +211,8 @@ class PDFStudio(ctk.CTk):
         self.apercu.changer_theme()
 
     def afficher_aide(self):
-        messagebox.showinfo("Aide et limites", LIMITES.format(log=os.path.join(DOSSIER_DONNEES, "pdfstudio.log")))
+        messagebox.showinfo("Aide et limites", LIMITES.format(
+            log=os.path.join(DOSSIER_DONNEES, "pdfstudio.log"), source=URL_SOURCE))
 
     def afficher_page(self, nom: str):
         """Affiche la page d'une fonction et met en évidence son bouton."""
