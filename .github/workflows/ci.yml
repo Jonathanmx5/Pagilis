@@ -42,7 +42,7 @@ jobs:
           }
 
       - name: Analyse du code
-        run: python -m pyflakes pdf_core.py pagilis.py apercu.py updater.py installation.py verification.py publication.py identite.py tests
+        run: python -m pyflakes pdf_core.py pagilis.py apercu.py updater.py installation.py verification.py publication.py identite.py edition.py conversion.py tests
 
       # Tests du cœur ET de l'interface (vraie fenêtre Tk, pilotée par programme).
       - name: Tests
