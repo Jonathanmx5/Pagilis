@@ -163,3 +163,30 @@ def test_replace_all_is_undoable(ed):
     assert "Total total" in texte(ed.doc) and ed.modifie
     ed.annuler()
     assert LIGNE in texte(ed.doc)
+
+
+def test_undo_memory_is_capped(tmp_path):
+    source = creer_pdf(tmp_path / "c.pdf")
+    taille = len(core.open_pdf(source).tobytes())
+    ed = edition.Edition(core.open_pdf(source), source, max_octets=int(taille * 3.5))
+    for i in range(6):
+        ed.pivoter([0], 90)
+    annulations = 0
+    while ed.peut_annuler:
+        ed.annuler()
+        annulations += 1
+    assert annulations == 3  # les plus anciennes copies sont abandonnées au-delà du plafond
+
+
+def test_undo_back_to_saved_state_is_not_modified(ed, tmp_path):
+    ed.corriger(0, centre(ed.doc, "Montant"), "Montant total : 950 euros.")
+    ed.annuler()
+    assert not ed.modifie  # revenu au document ouvert
+    ed.corriger(0, centre(ed.doc, "Montant"), "Montant total : 950 euros.")
+    ed.enregistrer(str(tmp_path / "a.pdf"))
+    ed.pivoter([0], 90)
+    assert ed.modifie
+    ed.annuler()
+    assert not ed.modifie  # revenu à l'état enregistré
+    ed.annuler()
+    assert ed.modifie  # avant l'enregistrement : différent du fichier enregistré

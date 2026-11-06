@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import shutil
 import subprocess
@@ -39,12 +40,22 @@ _LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
 DOSSIER_DONNEES = os.path.join(_LOCALAPPDATA, identite.DOSSIER_DONNEES)
 os.makedirs(DOSSIER_DONNEES, exist_ok=True)
 CONFIG = os.path.join(DOSSIER_DONNEES, "config.json")
-logging.basicConfig(
-    filename=os.path.join(DOSSIER_DONNEES, "pagilis.log"),
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    encoding="utf-8",
-)
+JOURNAL = os.path.join(DOSSIER_DONNEES, "pagilis.log")
+
+
+def _installer_journal() -> None:
+    """Journal limité à 3 fichiers de 1 Mo (pagilis.log, .1, .2, .3) : il ne grossit pas sans fin."""
+    racine = logging.getLogger()
+    if any(isinstance(h, logging.handlers.RotatingFileHandler) and h.baseFilename == os.path.abspath(JOURNAL)
+           for h in racine.handlers):
+        return
+    fichier = logging.handlers.RotatingFileHandler(JOURNAL, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    fichier.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    racine.addHandler(fichier)
+    racine.setLevel(logging.INFO)
+
+
+_installer_journal()
 
 
 def charger_config() -> dict:
@@ -77,6 +88,9 @@ class Pagilis(ctk.CTk):
         super().__init__(fg_color=theme.FOND)
         self.title(identite.NOM_AFFICHE)
         theme.poser_icone(self)
+        # Une erreur imprévue dans un clic ou un bouton : journalisée et signalée,
+        # au lieu de se perdre (l'exe n'a pas de console).
+        self.report_callback_exception = self._erreur_interface
         self.geometry("1280x780")
         self.minsize(1080, 640)
         self.config_data = charger_config()
@@ -309,6 +323,14 @@ class Pagilis(ctk.CTk):
 
     def _popup_mise_a_jour(self, mise_a_jour: updater.Update):
         fenetres.popup_mise_a_jour(self, mise_a_jour)
+
+    def _erreur_interface(self, type_erreur, erreur, trace):
+        logging.error("Erreur inattendue dans l'interface", exc_info=(type_erreur, erreur, trace))
+        try:
+            messagebox.showerror(identite.NOM_AFFICHE, "Une erreur inattendue s'est produite : la dernière "
+                                 "action n'a peut-être pas abouti. Détails dans pagilis.log.")
+        except Exception:  # noqa: BLE001 - la fenêtre peut être en train de se fermer
+            pass
 
     def sauver_preferences(self):
         sauver_config(self.config_data)

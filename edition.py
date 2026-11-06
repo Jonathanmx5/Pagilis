@@ -20,12 +20,31 @@ class Edition:
     """Document en cours de modification, avec sa pile d'annulations."""
 
     def __init__(self, doc: fitz.Document, source: str, origine_word: bool = False,
-                 max_annulations: int = 20):
+                 max_annulations: int = 20, max_octets: int = 300_000_000):
         self.doc = doc
         self.source = source            # fichier ouvert par l'utilisateur (PDF ou Word)
         self.origine_word = origine_word
-        self.modifie = False
-        self._annulations: deque[bytes] = deque(maxlen=max_annulations)
+        # Pile d'annulations : (copie du document, état qu'elle représente). Bornée en
+        # nombre ET en taille : sur un gros fichier, on garde moins d'étapes plutôt
+        # que d'épuiser la mémoire.
+        self._annulations: deque[tuple[bytes, int]] = deque()
+        self._max_annulations = max_annulations
+        self._max_octets = max_octets
+        self._octets = 0
+        # Chaque état du document a un numéro : « modifié » = l'état courant n'est pas
+        # celui du fichier enregistré (annuler jusqu'à lui efface donc le « • »).
+        self._etat = 0
+        self._prochain_etat = 1
+        self._etat_enregistre = 0
+
+    @property
+    def modifie(self) -> bool:
+        return self._etat != self._etat_enregistre
+
+    @modifie.setter
+    def modifie(self, valeur: bool) -> None:
+        # Faux : l'état courant vient d'être enregistré. Vrai : il diffère de tout fichier.
+        self._etat_enregistre = -1 if valeur else self._etat
 
     @property
     def peut_annuler(self) -> bool:
@@ -43,8 +62,12 @@ class Edition:
             self._recharger(instantane)
             raise
         if resultat:
-            self._annulations.append(instantane)
-            self.modifie = True
+            self._annulations.append((instantane, self._etat))
+            self._octets += len(instantane)
+            self._etat, self._prochain_etat = self._prochain_etat, self._prochain_etat + 1
+            while len(self._annulations) > 1 and (len(self._annulations) > self._max_annulations
+                                                  or self._octets > self._max_octets):
+                self._octets -= len(self._annulations.popleft()[0])  # la plus ancienne tombe
         return resultat
 
     def _recharger(self, donnees: bytes) -> None:
@@ -86,8 +109,10 @@ class Edition:
 
     def annuler(self) -> fitz.Document:
         """Revient à l'état d'avant la dernière retouche. IndexError s'il n'y en a pas."""
-        self._recharger(self._annulations.pop())
-        self.modifie = True
+        donnees, etat = self._annulations.pop()
+        self._octets -= len(donnees)
+        self._recharger(donnees)
+        self._etat = etat
         return self.doc
 
     def nom_propose(self) -> str:
@@ -98,7 +123,7 @@ class Edition:
 
     def enregistrer(self, chemin: str) -> None:
         ecrire_pdf(self.doc.tobytes(), chemin)
-        self.modifie = False
+        self._etat_enregistre = self._etat
 
 
 def ecrire_pdf(donnees: bytes, chemin: str) -> None:

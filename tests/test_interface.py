@@ -1069,3 +1069,28 @@ def test_window_shows_display_name(ui):
     s, creer, d = ui
     app = creer()
     assert app.title() == "Pagilis PDF"
+
+
+def test_unexpected_interface_error_is_logged_and_shown(ui, caplog):
+    s, creer, d = ui
+    app = creer()
+
+    def panne():
+        raise ValueError("panne imprévue")
+
+    def scenario():
+        app.after(0, panne)  # comme un clic dont le code plante
+        yield 100
+        assert any(m[0] == "showerror" and "pagilis.log" in m[2] for m in d.messages)
+        assert any("panne imprévue" in (r.exc_text or "") or (r.exc_info and "panne imprévue" in str(r.exc_info[1]))
+                   for r in caplog.records)
+
+    executer(app, scenario)
+
+
+def test_log_file_is_size_limited():
+    import logging.handlers
+    import pagilis as s
+    fichiers = [h for h in logging.getLogger().handlers if isinstance(h, logging.handlers.RotatingFileHandler)]
+    assert fichiers and fichiers[0].maxBytes == 1_000_000 and fichiers[0].backupCount == 3
+    assert fichiers[0].baseFilename.endswith("pagilis.log") and s.DOSSIER_DONNEES in fichiers[0].baseFilename
