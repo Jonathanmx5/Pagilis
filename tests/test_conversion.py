@@ -28,7 +28,7 @@ class Faux:
         if self.exception:
             raise self.exception
         if self.creer_pdf:
-            sortie = commande[-1] if commande[0].endswith("powershell") else os.path.join(
+            sortie = commande[-2] if commande[0].endswith("powershell") else os.path.join(
                 commande[commande.index("--outdir") + 1],
                 os.path.splitext(os.path.basename(commande[-1]))[0] + ".pdf")
             doc = fitz.open()
@@ -62,7 +62,7 @@ def test_uses_word_when_installed(faux, tmp_path):
     assert pdf == os.path.join(str(tmp_path), "L'été 2026.pdf") and os.path.exists(pdf)
     commande = f.commandes[0]
     assert commande[0] == "powershell" and "-File" in commande
-    assert commande[-2:] == [source, pdf]  # chemins en arguments, jamais dans le texte du script
+    assert commande[-3:-1] == [source, pdf]  # chemins en arguments, jamais dans le texte du script
     script = open(commande[commande.index("-File") + 1], encoding="utf-8-sig").read()
     assert "été" not in script and "ExportAsFixedFormat" in script
 
@@ -123,3 +123,24 @@ def test_real_word_conversion(tmp_path):
     source = docx_minimal(tmp_path / "L'été 2026.docx", "Bonjour Pagilis")
     pdf = conversion.word_vers_pdf(source, str(tmp_path / "sortie"))
     assert "Bonjour Pagilis" in fitz.open(pdf)[0].get_text()
+
+
+def test_timeout_kills_the_word_started_by_the_script(faux, tmp_path, monkeypatch):
+    """Word lancé par COM n'est pas un enfant de powershell : il faut l'arrêter nommément."""
+    tues = []
+    monkeypatch.setattr(conversion, "_tuer", tues.append)
+    faux(word=True, creer_pdf=False)
+
+    def lent(commande, delai):
+        with open(commande[-1], "w", encoding="ascii") as fh:  # fichier des PID écrit par le script
+            fh.write("4242\n")
+        raise subprocess.TimeoutExpired("powershell", delai)
+
+    monkeypatch.setattr(conversion, "_executer", lent)
+    with pytest.raises(core.PagilisError):
+        conversion.word_vers_pdf(str(tmp_path / "a.docx"), str(tmp_path))
+    assert tues == [4242]
+
+
+def test_word_script_never_quits_a_word_already_in_use():
+    assert "Documents.Count -eq 0" in conversion.SCRIPT_WORD

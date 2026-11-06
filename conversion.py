@@ -27,7 +27,13 @@ SCRIPT_WORD = r"""
 $ErrorActionPreference = 'Stop'
 $word = $null; $doc = $null
 try {
+    # Word lancé par COM n'est pas un enfant de ce script : on note son PID
+    # ($args[2]) pour pouvoir l'arrêter si le délai est dépassé.
+    $avant = @(Get-Process WINWORD -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
     $word = New-Object -ComObject Word.Application
+    $nouveaux = @(Get-Process WINWORD -ErrorAction SilentlyContinue |
+                  Where-Object { $avant -notcontains $_.Id } | ForEach-Object { $_.Id })
+    Set-Content -LiteralPath $args[2] -Value $nouveaux -Encoding ascii
     $word.Visible = $false
     $word.DisplayAlerts = 0
     try {
@@ -42,7 +48,8 @@ try {
     [Console]::Error.WriteLine($_.Exception.Message); exit 1
 } finally {
     if ($doc) { $doc.Close(0) }
-    if ($word) { $word.Quit() }
+    # Word déjà ouvert par l'utilisateur et réutilisé : on ne ferme pas ses documents.
+    if ($word -and $word.Documents.Count -eq 0) { $word.Quit() }
 }
 """
 
@@ -71,6 +78,21 @@ def chemin_libreoffice() -> Optional[str]:
     return None
 
 
+def _tuer(pid: int) -> None:
+    subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True,
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _tuer_word_lance(fichier_pid: Optional[str]) -> None:
+    """Arrête le Word lancé par le script (délai dépassé : boîte de dialogue invisible…)."""
+    if not fichier_pid or not os.path.exists(fichier_pid):
+        return
+    with open(fichier_pid, encoding="ascii", errors="ignore") as fh:
+        for ligne in fh:
+            if ligne.strip().isdigit():
+                _tuer(int(ligne))
+
+
 def _executer(commande: list[str], delai: int) -> subprocess.CompletedProcess:
     return subprocess.run(commande, capture_output=True, text=True, errors="replace", timeout=delai,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -84,12 +106,16 @@ def word_vers_pdf(source: str, dossier: str, delai: int = 120) -> str:
     os.makedirs(dossier, exist_ok=True)
     source = os.path.abspath(source)
     sortie = os.path.join(dossier, os.path.splitext(os.path.basename(source))[0] + ".pdf")
+    fichier_pid = None
     if word_installe():
         script = os.path.join(dossier, "pagilis_word_vers_pdf.ps1")
+        fichier_pid = os.path.join(dossier, "pagilis_word.pid")
+        if os.path.exists(fichier_pid):
+            os.remove(fichier_pid)
         with open(script, "w", encoding="utf-8-sig") as fh:
             fh.write(SCRIPT_WORD)
         commande = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                    "-File", script, source, sortie]
+                    "-File", script, source, sortie, fichier_pid]
         nom = "Microsoft Word"
     else:
         soffice = chemin_libreoffice()
@@ -102,6 +128,7 @@ def word_vers_pdf(source: str, dossier: str, delai: int = 120) -> str:
     try:
         resultat = _executer(commande, delai)
     except subprocess.TimeoutExpired:
+        _tuer_word_lance(fichier_pid)
         raise PagilisError(f"{nom} n'a pas converti le document en {delai} secondes.") from None
     except OSError as exc:
         raise PagilisError(f"Impossible de lancer {nom} : {exc}") from None

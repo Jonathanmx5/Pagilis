@@ -831,3 +831,49 @@ def test_leave_page_or_open_other_file_asks(ui, contrat, tmp_path):
         assert "1 200 euros" in " ".join(app.edition.doc[1].get_text().split())
 
     executer(app, scenario)
+
+
+def test_navigation_refused_while_a_job_runs(ui, contrat):
+    import threading
+    s, creer, d = ui
+    app = creer()
+    feu = threading.Event()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        app.lancer(lambda p: feu.wait(10))
+        app.afficher_page("Fusion")
+        app.ouvrir_document(str(contrat))
+        app._fermer()
+        assert app.page_active == "Modifier" and app.winfo_exists()
+        assert app.etat.cget("text") == "Traitement en cours, patientez…"
+        assert d.demandes_enregistrer == []  # aucune question pendant le traitement
+        feu.set()
+        yield TRAVAUX
+
+    executer(app, scenario)
+
+
+def test_other_pages_use_the_saved_file(ui, contrat, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "corrige.pdf"
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.enregistrer_sous = str(sortie)
+        app.enregistrer_edition()
+        yield TRAVAUX
+        assert app.chemin_pdf == str(sortie)
+        assert app.label_fichier.cget("text") == "corrige.pdf"
+        corriger_montant(app, "Montant total : 10 euros.")
+        d.oui_non_annuler = True
+        d.enregistrer_sous = str(tmp_path / "corrige2.pdf")
+        app.afficher_page("Fusion")
+        assert app.chemin_pdf == str(tmp_path / "corrige2.pdf")
+
+    executer(app, scenario)

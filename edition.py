@@ -72,12 +72,21 @@ class Edition:
         return os.path.join(dossier, f"{base}.pdf" if self.origine_word else f"{base}_modifie.pdf")
 
     def enregistrer(self, chemin: str) -> None:
-        # On enregistre une COPIE : le nettoyage (garbage) de save_atomic renumérote
-        # les objets du document enregistré, et une police déjà insérée deviendrait
-        # illisible pour les retouches suivantes faites sur ce même document.
-        copie = fitz.open("pdf", self.doc.tobytes())
-        try:
-            core.save_atomic(copie, chemin)
-        finally:
-            copie.close()
+        ecrire_pdf(self.doc.tobytes(), chemin)
         self.modifie = False
+
+
+def ecrire_pdf(donnees: bytes, chemin: str) -> None:
+    """Écrit un PDF à partir de ses octets (sûr depuis un autre thread).
+
+    On enregistre une COPIE et jamais le document de travail : le nettoyage
+    (garbage) de save_atomic renumérote les objets du document enregistré, et une
+    police déjà insérée deviendrait illisible pour les retouches suivantes. Les
+    octets sont pris dans le thread de l'interface ; ce thread-ci ne touche donc
+    jamais au document affiché.
+    """
+    copie = fitz.open("pdf", donnees)
+    try:
+        core.save_atomic(copie, chemin)
+    finally:
+        copie.close()

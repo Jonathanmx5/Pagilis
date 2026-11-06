@@ -25,7 +25,7 @@ import installation
 import pdf_core as core
 import updater
 from apercu import Apercu
-from edition import Edition
+from edition import Edition, ecrire_pdf
 
 # Dossier de configuration et journal, indispensables avec --noconsole.
 _LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
@@ -285,6 +285,8 @@ class Pagilis(ctk.CTk):
         """Affiche la page d'une fonction et met en évidence son bouton."""
         if self.page_active == "Modifier" and nom != "Modifier" and self.edition is not None:
             # Les autres fonctions lisent le fichier enregistré, pas la copie de travail.
+            if self._occupe():
+                return
             self._fermer_saisie()
             if not self._confirmer_abandon(abandonner=True):
                 return
@@ -411,8 +413,15 @@ class Pagilis(ctk.CTk):
 
     # ------------------------------------------------------ utilitaires
 
+    def _occupe(self) -> bool:
+        """Vrai (et le dit) si un traitement tourne : le document ne doit pas changer."""
+        if self.travaux_en_cours:
+            self.statut("Traitement en cours, patientez…")
+            return True
+        return False
+
     def _fermer(self):
-        if not self._confirmer_abandon():
+        if self._occupe() or not self._confirmer_abandon():
             return
         self.config_data["dernier_dossier"] = self.dernier_dossier
         sauver_config(self.config_data)
@@ -433,7 +442,7 @@ class Pagilis(ctk.CTk):
 
     def ouvrir_document(self, chemin: str):
         """Ouvre un PDF, ou convertit d'abord un Word en PDF (en arrière-plan)."""
-        if not self._confirmer_abandon():
+        if self._occupe() or not self._confirmer_abandon():
             return
         if not conversion.est_word(chemin):
             self.charger_fichier(chemin)
@@ -1361,13 +1370,21 @@ class Pagilis(ctk.CTk):
         if not chemin:
             return
         edition = self.edition
+        donnees = edition.doc.tobytes()  # ici, dans le thread de l'interface
 
         def fin(_resultat):
-            self._memoriser_dossier(chemin)
-            self._maj_etat_edition()
-            self.statut(f"Enregistré : {os.path.basename(chemin)}")
+            edition.modifie = False
+            self._apres_enregistrement_edition(chemin)
 
-        self.lancer(lambda _p: edition.enregistrer(chemin), fin=fin)
+        self.lancer(lambda _p: ecrire_pdf(donnees, chemin), fin=fin)
+
+    def _apres_enregistrement_edition(self, chemin: str):
+        """Le fichier enregistré devient le fichier ouvert : les autres fonctions le liront."""
+        self.chemin_pdf = chemin
+        self.label_fichier.configure(text=os.path.basename(chemin))
+        self._memoriser_dossier(chemin)
+        self._maj_etat_edition()
+        self.statut(f"Enregistré : {os.path.basename(chemin)}")
 
     def _confirmer_abandon(self, abandonner: bool = False) -> bool:
         """Retouches non enregistrées : propose de les enregistrer. Vrai = on peut continuer.
@@ -1390,7 +1407,7 @@ class Pagilis(ctk.CTk):
                 logging.exception("Enregistrement impossible : %s", chemin)
                 messagebox.showerror("Pagilis", f"Impossible d'enregistrer « {os.path.basename(chemin)} ».")
                 return False
-            self._memoriser_dossier(chemin)
+            self._apres_enregistrement_edition(chemin)
         elif abandonner:
             # Retouches abandonnées : on repart du document tel qu'il a été ouvert.
             source, word = ed.source, ed.origine_word
