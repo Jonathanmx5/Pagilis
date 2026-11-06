@@ -9,18 +9,19 @@ from __future__ import annotations
 
 import logging
 import os
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 import pymupdf as fitz
-from PIL import Image
+from PIL import Image, ImageTk
 
 import identite
 import pdf_core as core
 import theme
 from pages.copie import PageCopie
 
-LARGEUR_VIGNETTE = 140  # pixels
+CELLULE = (134, 158)  # largeur, hauteur d'une vignette avec son numéro (pixels)
 COULEUR_CHOISIE = theme.ACCENT_DOUX
 
 
@@ -47,7 +48,7 @@ class PageGestionPages(PageCopie):
         self.selection: set[int] = set()
         self._ancre: int | None = None   # point de départ d'une sélection avec Maj
         self.vignettes: list[ctk.CTkFrame] = []
-        self._images: list[ctk.CTkImage] = []
+        self._images: list[ImageTk.PhotoImage] = []
         self._a_redessiner = True
         self.section("Pages sélectionnées")
         self.aide("Clic : une page. Ctrl+clic : en ajouter. Maj+clic : une suite de pages.")
@@ -64,8 +65,14 @@ class PageGestionPages(PageCopie):
             side="left", fill="x", expand=True, padx=(0, 6))
         theme.bouton(ligne, "Extraire…", self.extraire, icone_nom="extraire").pack(side="left", fill="x", expand=True)
         self.section("Toutes les pages")
-        self.grille = ctk.CTkFrame(self.cadre, fg_color="transparent")
-        self.grille.pack(fill="x", padx=10, pady=(0, 12))
+        # Toutes les vignettes sur UNE surface de dessin : des centaines de pages
+        # s'affichent en une fraction de seconde (un widget par page prenait des secondes).
+        self.echelle = ctk.ScalingTracker.get_widget_scaling(self.cadre)
+        self.toile = tk.Canvas(self.cadre, bg=theme.SURFACE, highlightthickness=0, bd=0,
+                               width=round(2 * CELLULE[0] * self.echelle), height=10)
+        self.toile.pack(padx=10, pady=(0, 12), anchor="w")
+        self.toile.bind("<Button-1>", self._clic_toile)
+        self._a_actualiser: list[int] | None = None  # pages à redessiner seules, sinon tout
 
     # ------------------------------------------------------- vignettes
 
@@ -76,48 +83,79 @@ class PageGestionPages(PageCopie):
     def edition_changee(self):
         self._a_redessiner = True
         if self.app.page_active == self.nom:
-            self._dessiner_vignettes()
+            pages, self._a_actualiser = self._a_actualiser, None
+            if pages is not None and self.edition and len(self.vignettes) == self.edition.doc.page_count:
+                self._actualiser_vignettes(pages)
+            else:
+                self._dessiner_vignettes()
 
     def document_charge(self):
         self.selection.clear()
         self._ancre = None
         super().document_charge()
 
+    # Cellule d'une vignette (pixels avant mise à l'échelle de l'écran) et côté maximal de l'image.
+    def _image_page(self, i: int) -> ImageTk.PhotoImage:
+        page = self.edition.doc[i]
+        cote = (CELLULE[0] - 24) * self.echelle
+        zoom = cote / max(page.rect.width, page.rect.height)
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
+
+    def _position(self, i: int) -> tuple[float, float, float, float]:
+        largeur, hauteur = CELLULE[0] * self.echelle, CELLULE[1] * self.echelle
+        x0, y0 = (i % 2) * largeur, (i // 2) * hauteur
+        return x0, y0, x0 + largeur, y0 + hauteur
+
+    def _dessiner_cellule(self, i: int):
+        x0, y0, x1, y1 = self._position(i)
+        e = self.echelle
+        fond = self.toile.create_rectangle(x0 + 3 * e, y0 + 3 * e, x1 - 3 * e, y1 - 3 * e, width=0,
+                                           fill=COULEUR_CHOISIE if i in self.selection else theme.SURFACE)
+        self.toile.create_image((x0 + x1) / 2, y0 + (y1 - y0 - 20 * e) / 2 + 2 * e, image=self._images[i],
+                                tags=f"image{i}")
+        self.toile.create_text((x0 + x1) / 2, y1 - 13 * e, text=str(i + 1), fill=theme.TEXTE_2,
+                               font=(theme.POLICE, -round(12 * e)))
+        return fond
+
     def _dessiner_vignettes(self):
         """Une vignette par page de la copie de travail, deux par ligne."""
         if self.app.travaux_en_cours:
             return  # PyMuPDF ne doit pas travailler sur deux threads ; on redessinera après
-        for enfant in self.grille.winfo_children():
-            enfant.destroy()
+        self.toile.delete("all")
         self.vignettes, self._images = [], []
         self._a_redessiner = False
         doc = self.edition.doc if self.edition else None
         if doc is None:
-            self.aide("Ouvrez un PDF pour voir ses pages.", parent=self.grille)
+            self.toile.configure(height=round(40 * self.echelle))
+            self.toile.create_text(6, 20 * self.echelle, anchor="w", text="Ouvrez un PDF pour voir ses pages.",
+                                   fill=theme.TEXTE_2, font=(theme.POLICE, -round(12 * self.echelle)))
             return
         self.selection = {i for i in self.selection if i < doc.page_count}
-        for i, page in enumerate(doc):
-            echelle = LARGEUR_VIGNETTE / max(page.rect.width, page.rect.height)
-            pix = page.get_pixmap(matrix=fitz.Matrix(echelle, echelle), alpha=False)
-            image = ctk.CTkImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples),
-                                 size=(pix.width, pix.height))
-            cellule = ctk.CTkFrame(self.grille, corner_radius=8, border_width=0, fg_color="transparent")
-            cellule.grid(row=i // 2, column=i % 2, padx=4, pady=4, sticky="n")
-            vignette = ctk.CTkLabel(cellule, image=image, text="")
-            vignette.pack(padx=6, pady=(6, 0))
-            numero = ctk.CTkLabel(cellule, text=str(i + 1), font=theme.police(12), text_color=theme.TEXTE_2)
-            numero.pack(pady=(0, 4))
-            for widget in (vignette, numero):
-                # état du clic : 0x4 = Ctrl, 0x1 = Maj
-                widget.bind("<Button-1>", lambda e, i=i: self.cliquer(
-                    i, ctrl=bool(e.state & 0x4), maj=bool(e.state & 0x1)))
-            self.vignettes.append(cellule)
-            self._images.append(image)
-        self._marquer_selection()
+        self._images = [self._image_page(i) for i in range(doc.page_count)]
+        self.vignettes = [self._dessiner_cellule(i) for i in range(doc.page_count)]
+        self.toile.configure(height=self._position(doc.page_count - 1)[3] + 4)
+
+    def _actualiser_vignettes(self, pages: list[int]):
+        """Redessine seulement les images de `pages` (après une rotation, par exemple)."""
+        if self.app.travaux_en_cours:
+            return
+        self._a_redessiner = False
+        for i in pages:
+            self._images[i] = self._image_page(i)
+            self.toile.itemconfigure(f"image{i}", image=self._images[i])
 
     def _marquer_selection(self):
-        for i, cellule in enumerate(self.vignettes):
-            cellule.configure(fg_color=COULEUR_CHOISIE if i in self.selection else "transparent")
+        for i, fond in enumerate(self.vignettes):
+            self.toile.itemconfigure(fond, fill=COULEUR_CHOISIE if i in self.selection else theme.SURFACE)
+
+    def _clic_toile(self, evenement):
+        """Clic sur la surface des vignettes : quelle page ? (état 0x4 = Ctrl, 0x1 = Maj)."""
+        colonne = int(evenement.x // (CELLULE[0] * self.echelle))
+        rang = int(self.toile.canvasy(evenement.y) // (CELLULE[1] * self.echelle))
+        i = rang * 2 + colonne
+        if colonne in (0, 1) and 0 <= i < len(self.vignettes):
+            self.cliquer(i, ctrl=bool(evenement.state & 0x4), maj=bool(evenement.state & 0x1))
 
     def cliquer(self, index: int, ctrl: bool = False, maj: bool = False):
         """Sélection à la souris : simple, ajout (Ctrl) ou suite (Maj)."""
@@ -146,7 +184,10 @@ class PageGestionPages(PageCopie):
 
     def tourner(self, angle: int):
         pages = self._choisies()
-        if pages and self.retoucher(lambda: self.edition.pivoter(pages, angle)):
+        self._a_actualiser = pages
+        pivotees = pages and self.retoucher(lambda: self.edition.pivoter(pages, angle))
+        self._a_actualiser = None
+        if pivotees:
             self.app.statut(f"{len(pages)} page(s) pivotée(s).")
 
     def supprimer(self):
@@ -156,7 +197,7 @@ class PageGestionPages(PageCopie):
             reste = self.edition.doc.page_count
             self.selection = {min(pages[0], reste - 1)}
             self._ancre = None
-            self._dessiner_vignettes()
+            self._marquer_selection()
             self.app.statut(f"{len(pages)} page(s) supprimée(s).")
 
     def deplacer(self, sens: int):
