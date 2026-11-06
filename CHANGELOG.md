@@ -11,6 +11,16 @@ Numérotation : MAJEUR.MINEUR.CORRECTIF.
 Une bêta (tag `v1.2.0-beta.1`) reprend les notes de sa version (`1.2.0`) si
 elle n'a pas de section propre.
 
+## [1.5.0]
+
+- Nouvelle fonction « Pages » : les vignettes de toutes les pages, pour
+  pivoter, supprimer, monter ou descendre des pages, insérer un autre PDF et
+  extraire une sélection dans un nouveau fichier. Sélection au clic,
+  Ctrl+clic et Maj+clic.
+- « Modifier » et « Pages » travaillent sur le même document : les retouches
+  de texte et de pages s'annulent (Ctrl+Z) et s'enregistrent (Ctrl+S)
+  ensemble.
+
 ## [1.4.0]
 
 - Une ligne corrigée garde sa police d'origine : celle du PDF quand elle

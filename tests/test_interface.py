@@ -898,3 +898,152 @@ def test_status_tells_which_font_was_used(ui, contrat, monkeypatch, niveau, atte
         assert app.etat.cget("text") == attendu
 
     executer(app, scenario)
+
+
+# --------------------------------------------------------- page « Pages »
+
+
+@pytest.fixture
+def cinq_pages(tmp_path):
+    chemin = tmp_path / "cinq.pdf"
+    doc = fitz.open()
+    for i in range(5):
+        doc.new_page(width=300, height=400).insert_text((50, 50), f"Page {i + 1}", fontsize=14)
+    doc.save(chemin)
+    return chemin
+
+
+def ordre_pages(doc):
+    return [p.get_text().strip() for p in doc]
+
+
+def ouvrir_pages(app, chemin):
+    app.ouvrir_document(str(chemin))
+    app.afficher_page("Pages")
+    return app.fonctions["Pages"]
+
+
+def test_pages_shows_thumbnails_and_selects(ui, cinq_pages):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        p = ouvrir_pages(app, cinq_pages)
+        yield 300
+        assert len(p.vignettes) == 5
+        p.cliquer(2)
+        assert p.selection == {2} and app.apercu.index == 2
+        p.cliquer(4, ctrl=True)
+        assert p.selection == {2, 4}
+        p.cliquer(0, maj=True)  # comme l'Explorateur : la suite part du dernier Ctrl+clic (4)
+        assert p.selection == {0, 1, 2, 3, 4}
+        p.cliquer(1)
+        assert p.selection == {1}
+
+    executer(app, scenario)
+
+
+def test_pages_rotate_delete_move_undo_and_save(ui, cinq_pages, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "range.pdf"
+
+    def scenario():
+        p = ouvrir_pages(app, cinq_pages)
+        yield 300
+        p.cliquer(1)
+        p.tourner(90)
+        assert app.edition.doc[1].rotation == 90 and "•" in app.title()
+        p.cliquer(3)
+        p.supprimer()
+        assert ordre_pages(app.edition.doc) == ["Page 1", "Page 2", "Page 3", "Page 5"]
+        assert len(p.vignettes) == 4
+        p.cliquer(3)
+        p.deplacer(-1)
+        assert ordre_pages(app.edition.doc) == ["Page 1", "Page 2", "Page 5", "Page 3"]
+        assert p.selection == {2}
+        p.touche_annuler()
+        assert ordre_pages(app.edition.doc) == ["Page 1", "Page 2", "Page 3", "Page 5"]
+        d.enregistrer_sous = str(sortie)
+        p.touche_enregistrer()
+        yield TRAVAUX
+        enregistre = fitz.open(sortie)
+        assert ordre_pages(enregistre) == ["Page 1", "Page 2", "Page 3", "Page 5"]
+        assert enregistre[1].rotation == 90 and "•" not in app.title()
+
+    executer(app, scenario)
+
+
+def test_pages_insert_pdf_after_selection(ui, cinq_pages, tmp_path, monkeypatch):
+    s, creer, d = ui
+    app = creer()
+    autre = tmp_path / "annexe.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "Annexe")
+    doc.save(autre)
+    monkeypatch.setattr(s.filedialog, "askopenfilename", lambda **k: str(autre))
+
+    def scenario():
+        p = ouvrir_pages(app, cinq_pages)
+        yield 300
+        p.cliquer(0)
+        p.inserer()
+        assert ordre_pages(app.edition.doc)[:3] == ["Page 1", "Annexe", "Page 2"]
+        assert p.selection == {1} and len(p.vignettes) == 6
+
+    executer(app, scenario)
+
+
+def test_pages_extract_selection_leaves_document(ui, cinq_pages, tmp_path):
+    s, creer, d = ui
+    app = creer()
+    sortie = tmp_path / "extrait.pdf"
+
+    def scenario():
+        p = ouvrir_pages(app, cinq_pages)
+        yield 300
+        p.cliquer(4)
+        p.cliquer(1, ctrl=True)
+        d.enregistrer_sous = str(sortie)
+        p.extraire()
+        yield TRAVAUX
+        assert ordre_pages(fitz.open(sortie)) == ["Page 2", "Page 5"]
+        assert not app.edition.modifie and app.edition.doc.page_count == 5
+        assert d.demandes_enregistrer[-1]["initialfile"] == "cinq_pages_2,5.pdf"
+
+    executer(app, scenario)
+
+
+def test_pages_refuse_deleting_every_page(ui, cinq_pages):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        p = ouvrir_pages(app, cinq_pages)
+        yield 300
+        p.cliquer(0)
+        p.cliquer(4, maj=True)
+        p.supprimer()
+        assert app.edition.doc.page_count == 5 and not app.edition.modifie
+        assert any(m[0] == "showwarning" and "au moins une" in m[2] for m in d.messages)
+
+    executer(app, scenario)
+
+
+def test_switching_between_modifier_and_pages_keeps_edits(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        ouvrir_modifier(app, contrat)
+        yield 300
+        corriger_montant(app)
+        d.oui_non_annuler = None  # une question ici bloquerait le changement de page
+        app.afficher_page("Pages")
+        assert app.page_active == "Pages" and app.edition.modifie
+        app.afficher_page("Modifier")
+        assert app.page_active == "Modifier"
+        app.afficher_page("Fusion")
+        assert app.page_active == "Modifier"  # vers une autre fonction : la question est posée
+
+    executer(app, scenario)

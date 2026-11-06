@@ -32,6 +32,14 @@ dernières retouches, Ctrl+S enregistre en PDF (pour un Word : `<nom>.pdf` à
 côté du document). Un Word est converti avec Microsoft Word, ou LibreOffice
 s'il n'y a pas Word ; sans l'un des deux, il ne peut pas être ouvert.
 
+## Gérer les pages
+
+Fonction **Pages** : les vignettes de toutes les pages s'affichent ; clic,
+Ctrl+clic et Maj+clic pour sélectionner. Pivoter (↺ ↻), supprimer, monter ou
+descendre (▲ ▼), insérer un autre PDF après la sélection, extraire la sélection
+dans un nouveau PDF. Les changements s'annulent et s'enregistrent avec ceux de
+« Modifier » (même document de travail).
+
 ## Limites connues
 
 - Remplacer / modifier / déplacer du texte : la police d'origine est reprise
