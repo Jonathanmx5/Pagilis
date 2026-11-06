@@ -418,3 +418,81 @@ def test_update_popup_offers_and_can_skip_version(ui, monkeypatch):
         assert not popup.winfo_exists()
 
     executer(app, scenario)
+
+
+# ------------------------------------------------------- page « Modifier »
+
+
+def test_modifier_is_first_function(ui):
+    s, creer, d = ui
+    app = creer()
+    assert list(app.boutons_nav)[0] == "Modifier"
+    textes = []
+
+    def parcourir(w):
+        for enfant in w.winfo_children():
+            if hasattr(enfant, "cget"):
+                try:
+                    textes.append(enfant.cget("text"))
+                except Exception:  # noqa: BLE001 - widget sans texte
+                    pass
+            parcourir(enfant)
+    parcourir(app.pages["Modifier"])
+    assert "Cliquez sur une ligne pour la corriger, faites glisser un bloc pour le déplacer." in textes
+
+
+def test_open_pdf_creates_working_copy(ui, contrat):
+    s, creer, d = ui
+    app = creer()
+
+    def scenario():
+        app.afficher_page("Modifier")
+        app.ouvrir_document(str(contrat))
+        yield 100
+        assert app.edition.source == str(contrat) and not app.edition.origine_word
+        assert app.apercu.doc is app.edition.doc
+
+    executer(app, scenario)
+
+
+def test_open_word_converts_then_loads(ui, contrat, tmp_path, monkeypatch):
+    import shutil
+    s, creer, d = ui
+    app = creer()
+    source = tmp_path / "lettre.docx"
+    source.write_bytes(b"faux word")
+
+    def convertir(chemin, dossier, delai=120):
+        sortie = os.path.join(dossier, "lettre.pdf")
+        shutil.copy(contrat, sortie)
+        return sortie
+
+    monkeypatch.setattr(s.conversion, "word_vers_pdf", convertir)
+
+    def scenario():
+        app.afficher_page("Modifier")
+        app.ouvrir_document(str(source))
+        yield TRAVAUX
+        assert app.edition.origine_word and app.edition.source == str(source)
+        assert app.apercu.doc is app.edition.doc and app.apercu.doc.page_count == 2
+
+    executer(app, scenario)
+
+
+def test_word_conversion_error_is_shown(ui, tmp_path, monkeypatch):
+    s, creer, d = ui
+    app = creer()
+    message = "Pour ouvrir un fichier Word, Microsoft Word ou LibreOffice doit être installé."
+
+    def echec(*a, **k):
+        raise core.PagilisError(message)
+
+    monkeypatch.setattr(s.conversion, "word_vers_pdf", echec)
+
+    def scenario():
+        app.ouvrir_document(str(tmp_path / "a.docx"))
+        yield TRAVAUX
+        assert app.edition is None
+        assert ("showwarning", "Pagilis", message) in d.messages
+
+    executer(app, scenario)

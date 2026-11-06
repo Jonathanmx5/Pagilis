@@ -8,7 +8,9 @@ import json
 import logging
 import os
 import subprocess
+import shutil
 import sys
+import tempfile
 import threading
 import traceback
 from tkinter import filedialog, messagebox, simpledialog
@@ -17,11 +19,13 @@ import customtkinter as ctk
 import pymupdf as fitz
 from PIL import Image, ImageTk
 
+import conversion
 import identite
 import installation
 import pdf_core as core
 import updater
 from apercu import Apercu
+from edition import Edition
 
 # Dossier de configuration et journal, indispensables avec --noconsole.
 _LOCALAPPDATA = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
@@ -56,6 +60,7 @@ def sauver_config(config: dict) -> None:
 
 # Fonctions affichées dans la barre latérale : (nom, icône, description).
 FONCTIONS = [
+    ("Modifier", "✎", "Corriger ou déplacer du texte, PDF ou Word"),
     ("Fusion", "⧉", "Assembler plusieurs PDF dans l'ordre choisi"),
     ("Division", "✂", "Découper un PDF en plusieurs fichiers"),
     ("Signature / Tampon", "✍", "Poser une signature ou un tampon image"),
@@ -76,6 +81,10 @@ class Pagilis(ctk.CTk):
         self.config_data = charger_config()
         self.dernier_dossier = self.config_data.get("dernier_dossier", os.path.expanduser("~"))
         self.chemin_pdf: str | None = None
+        # Copie de travail de la page « Modifier » (document affiché dans l'aperçu).
+        self.edition: Edition | None = None
+        # PDF issus des conversions Word de la session ; dossier supprimé à la fermeture.
+        self.dossier_conversions = tempfile.mkdtemp(prefix="pagilis-word-")
         self.page_active = FONCTIONS[0][0]
         self._geste = None  # geste souris en cours dans l'aperçu
         # Nombre de traitements en cours : la mise à jour est bloquée tant qu'il est > 0,
@@ -103,7 +112,7 @@ class Pagilis(ctk.CTk):
         fichier.grid(row=0, column=1, rowspan=2, sticky="e")
         self.label_fichier = ctk.CTkLabel(fichier, text="Aucun fichier ouvert", text_color=("gray40", "gray65"))
         self.label_fichier.pack(side="left", padx=(12, 8), pady=8)
-        ctk.CTkButton(fichier, text="Ouvrir un PDF…", width=130, command=self.choisir_pdf).pack(side="left", padx=(0, 8), pady=8)
+        ctk.CTkButton(fichier, text="Ouvrir…", width=110, command=self.choisir_pdf).pack(side="left", padx=(0, 8), pady=8)
 
         # Une page (défilante) par fonction ; une seule est visible à la fois.
         self.pages: dict[str, ctk.CTkScrollableFrame] = {}
@@ -121,6 +130,7 @@ class Pagilis(ctk.CTk):
         self.apercu.on_glisse = self._souris_glisse
         self.apercu.on_relache = self._souris_relache
 
+        self._construire_modifier()
         self._construire_fusion()
         self._construire_division()
         self._construire_tampon()
@@ -385,6 +395,7 @@ class Pagilis(ctk.CTk):
     def _fermer(self):
         self.config_data["dernier_dossier"] = self.dernier_dossier
         sauver_config(self.config_data)
+        shutil.rmtree(self.dossier_conversions, ignore_errors=True)
         self.destroy()
 
     def _memoriser_dossier(self, chemin: str):
@@ -392,11 +403,27 @@ class Pagilis(ctk.CTk):
 
     def choisir_pdf(self):
         chemin = filedialog.askopenfilename(
-            initialdir=self.dernier_dossier, filetypes=[("PDF", "*.pdf")]
+            initialdir=self.dernier_dossier,
+            filetypes=[("PDF et Word", "*.pdf *.docx *.doc *.rtf *.odt"), ("PDF", "*.pdf")],
         )
         if chemin:
             self._memoriser_dossier(chemin)
+            self.ouvrir_document(chemin)
+
+    def ouvrir_document(self, chemin: str):
+        """Ouvre un PDF, ou convertit d'abord un Word en PDF (en arrière-plan)."""
+        if not conversion.est_word(chemin):
             self.charger_fichier(chemin)
+            return
+        dossier = self.dossier_conversions
+
+        def fin(pdf: str):
+            if self.charger_fichier(pdf):
+                self.edition = Edition(self.apercu.doc, chemin, origine_word=True)
+                self.label_fichier.configure(text=os.path.basename(chemin))
+
+        self.statut("Conversion du document Word…")
+        self.lancer(lambda _p: conversion.word_vers_pdf(chemin, dossier), fin=fin)
 
     def demander_mot_de_passe(self, chemin: str) -> bool:
         """Demande le mot de passe d'un PDF chiffré et le mémorise. Faux si annulé."""
@@ -408,8 +435,8 @@ class Pagilis(ctk.CTk):
         core.remember_password(chemin, mot_de_passe)
         return True
 
-    def charger_fichier(self, chemin: str):
-        """Ouvre un PDF dans l'aperçu ; demande le mot de passe s'il est chiffré."""
+    def charger_fichier(self, chemin: str) -> bool:
+        """Ouvre un PDF dans l'aperçu ; demande le mot de passe s'il est chiffré. Vrai si ouvert."""
         while True:
             try:
                 doc = core.open_pdf(chemin)
@@ -417,18 +444,21 @@ class Pagilis(ctk.CTk):
             except core.PasswordRequired:
                 if not self.demander_mot_de_passe(chemin):
                     self.statut("Ouverture annulée : mot de passe requis.")
-                    return
+                    return False
                 # Un mot de passe faux relève PasswordRequired : on redemande.
             except Exception:  # noqa: BLE001 - fichier illisible, on le dit sans planter
                 logging.exception("Ouverture impossible : %s", chemin)
                 messagebox.showerror("Pagilis", f"Impossible d'ouvrir « {os.path.basename(chemin)} ».")
-                return
+                return False
         self.chemin_pdf = chemin
         self.label_fichier.configure(text=os.path.basename(chemin))
         self.selection = None
         self.resultats_recherche = {}
         self.apercu.charger(doc)
+        # Nouvelle copie de travail (page « Modifier ») sur le document affiché.
+        self.edition = Edition(doc, chemin)
         self.statut(f"Fichier ouvert : {os.path.basename(chemin)} ({doc.page_count} page(s))")
+        return True
 
     def statut(self, texte: str):
         self.etat.configure(text=texte)
@@ -548,6 +578,25 @@ class Pagilis(ctk.CTk):
             messagebox.showinfo("Pagilis", "Ouvrez d'abord un PDF (bouton en haut à droite).")
             return False
         return True
+
+    # ---------------------------------------------------------- Modifier
+
+    def _construire_modifier(self):
+        onglet = self.pages["Modifier"]
+        self._section(onglet, "Document")
+        self._aide(onglet, "Ouvrez un PDF ou un document Word (converti en PDF ; Microsoft Word "
+                           "ou LibreOffice requis).")
+        ctk.CTkButton(onglet, text="Ouvrir…", command=self.choisir_pdf).pack(fill="x", padx=12, pady=(4, 4))
+        self._section(onglet, "Retoucher")
+        self._aide(onglet, "Cliquez sur une ligne pour la corriger, faites glisser un bloc pour le déplacer.")
+        boutons = ctk.CTkFrame(onglet, fg_color="transparent")
+        boutons.pack(fill="x", padx=12, pady=(10, 12))
+        self.bouton_annuler = ctk.CTkButton(boutons, text="Annuler (Ctrl+Z)", state="disabled",
+                                            command=lambda: self.annuler_retouche())
+        self.bouton_annuler.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.bouton_enregistrer = ctk.CTkButton(boutons, text="Enregistrer (Ctrl+S)", state="disabled",
+                                                command=lambda: self.enregistrer_edition())
+        self.bouton_enregistrer.pack(side="left", fill="x", expand=True)
 
     # ---------------------------------------------------------- Fusion
 
@@ -1189,7 +1238,7 @@ def main() -> None:
     # « Ouvrir avec Pagilis » ou PDF glissé sur l'exe : le chemin arrive en argument.
     fichiers = [a for a in arguments if a.lower().endswith(".pdf") and os.path.isfile(a)]
     if fichiers:
-        app.after(200, lambda: app.charger_fichier(os.path.abspath(fichiers[0])))
+        app.after(200, lambda: app.ouvrir_document(os.path.abspath(fichiers[0])))
     app.mainloop()
 
 
